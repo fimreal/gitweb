@@ -1,0 +1,43 @@
+# Binaries
+gitweb
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary
+*.test
+
+# Output of the go coverage tool
+*.out
+
+# Go workspace file
+go.work
+
+# Config files with secrets
+config.yaml
+*.secret.yaml
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Backup files
+*.bak
+*.bak[0-9]
+*.backup
+*.tmp
+*.tmp[0-9]
+*.broken
+*.original

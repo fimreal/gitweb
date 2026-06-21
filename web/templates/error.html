@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Error {{ .Code }}</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="container error-page">
+        <header>
+            <h1>Error {{ .Code }}</h1>
+        </header>
+        <main>
+            <p>{{ .Message }}</p>
+            <a href="/" data-en="← Back to Home" data-zh="← 返回首页">← Back to Home</a>
+        </main>
+    </div>
+    <script src="/static/js/app.js"></script>
+</body>
+</html>

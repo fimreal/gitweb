@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>gitweb</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="hero">
+        <div class="controls">
+            <button id="theme-toggle" class="icon-btn" title="Toggle theme">🌓</button>
+            <button id="lang-toggle" class="icon-btn" title="Switch language">EN</button>
+        </div>
+        
+        <div class="hero-content">
+            <h1 class="logo">gitweb</h1>
+            <p class="tagline" data-en="Transform git repositories into browsable web pages" data-zh="将 Git 仓库转化为可浏览的网页">Transform git repositories into browsable web pages</p>
+            
+            <div class="input-card">
+                <form id="register-form">
+                    <div class="input-wrapper">
+                        <input type="text" 
+                               id="git_url" 
+                               name="git_url" 
+                               class="main-input"
+                               placeholder="Paste your git repository URL here..."
+                               data-placeholder-en="Paste your git repository URL here..."
+                               data-placeholder-zh="粘贴 Git 仓库地址..."
+                               required>
+                        <button type="submit" class="submit-btn" data-en="Create" data-zh="创建">Create</button>
+                    </div>
+                    
+                    <details class="advanced-options">
+                        <summary data-en="⚙ Advanced" data-zh="⚙ 高级选项">⚙ Advanced</summary>
+                        <div class="compact-grid">
+                            <input type="text" id="pathid" name="pathid" placeholder="Path ID (auto)" class="compact-input">
+                            <input type="text" id="ref" name="ref" placeholder="Branch" value="main" class="compact-input">
+                            <select id="auth_type" name="auth_type" class="compact-input">
+                                <option value="">No auth</option>
+                                <option value="token">Token</option>
+                                <option value="basic">User/Pass</option>
+                            </select>
+                            <input type="password" id="token" name="token" placeholder="Token" class="compact-input" style="display:none;">
+                            <input type="text" id="username" name="username" placeholder="Username" class="compact-input" style="display:none;">
+                            <input type="password" id="password" name="password" placeholder="Password" class="compact-input" style="display:none;">
+                        </div>
+                    </details>
+                </form>
+                
+                <div id="result" style="display:none;"></div>
+            </div>
+            
+            <div id="sites-list" class="sites-grid" style="display:none;"></div>
+        </div>
+    </div>
+    
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
