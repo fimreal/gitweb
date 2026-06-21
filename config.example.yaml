@@ -1,0 +1,24 @@
+base_url: http://localhost:8080
+listen: ":8080"
+admin_token: ""  # Set a secure token to protect registration API
+
+cache:
+  ttl: 60s
+  max_entries: 2048
+  max_file_size: 5242880  # 5MB in bytes
+
+fetch:
+  timeout: 10s
+  https_only: false
+  http_proxy: ""   # e.g., http://192.168.10.1:54122
+  https_proxy: ""  # e.g., http://192.168.10.1:54122
+  allow_hosts: []
+  deny_hosts: ["127.0.0.1", "localhost", "*.local"]
+
+sites:
+  - git_url: https://github.com/username/repo
+    pathid: example
+    ref: main
+    # auth:
+    #   type: token
+    #   token: ${GITHUB_TOKEN}
