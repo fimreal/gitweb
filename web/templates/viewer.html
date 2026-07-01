@@ -3,723 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{ .RepoName }} - GitWeb</title>
+    <title>{{ .RepoName }} - gitweb</title>
     <link rel="stylesheet" href="/static/css/viewer.css">
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: #f5f5f5;
-            overflow: hidden;
-        }
-        
-        .container {
-            display: flex;
-            height: 100vh;
-        }
-        
-        .sidebar {
-            width: 300px;
-            min-width: 200px;
-            background: white;
-            border-right: 1px solid #ddd;
-            display: flex;
-            flex-direction: column;
-            position: relative;
-        }
-        
-        .sidebar-header {
-            padding: 16px;
-            border-bottom: 1px solid #eee;
-            background: #f8f9fa;
-        }
-        
-        .sidebar-header h2 {
-            font-size: 16px;
-            margin-bottom: 8px;
-            color: #333;
-        }
-        
-        .sidebar-controls {
-            display: flex;
-            gap: 8px;
-            margin-top: 8px;
-        }
-        
-        .sidebar-toggle {
-            position: absolute;
-            right: 8px;
-            top: 16px;
-            background: #007bff;
-            color: white;
-            border: none;
-            width: 28px;
-            height: 28px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 16px;
-            z-index: 10;
-        }
-        
-        .sidebar-toggle:hover {
-            background: #0056b3;
-        }
-        
-        .file-tree {
-            flex: 1;
-            overflow-y: auto;
-            padding: 8px;
-        }
-        
-        .folder-item, .file-item {
-            padding: 6px 8px;
-            cursor: pointer;
-            border-radius: 4px;
-            margin: 2px 0;
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            font-size: 14px;
-        }
-        
-        .folder-item:hover, .file-item:hover {
-            background: #f0f0f0;
-        }
-        
-        .file-item.active {
-            background: #e3f2fd;
-            color: #1976d2;
-        }
-        
-        .folder-icon, .file-icon {
-            font-size: 16px;
-            flex-shrink: 0;
-        }
-        
-        .folder-name, .file-name {
-            flex: 1;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-        
-        .file-size {
-            font-size: 11px;
-            color: #999;
-        }
-        
-        .dir-content {
-            padding-left: 16px;
-        }
-        
-        .hidden-item {
-            opacity: 0.5;
-        }
-        
-        .resizer {
-            width: 4px;
-            background: #ddd;
-            cursor: col-resize;
-            position: relative;
-        }
-        
-        .resizer:hover {
-            background: #007bff;
-        }
-        
-        .content {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            background: #fafafa;
-            overflow: hidden;
-        }
-        
-        .content-header {
-            padding: 16px 20px;
-            background: white;
-            border-bottom: 1px solid #ddd;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        
-        .repo-info {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-        }
-        
-        .repo-name {
-            font-size: 18px;
-            font-weight: 600;
-            color: #333;
-        }
-        
-        .repo-ref {
-            background: #e3f2fd;
-            color: #1976d2;
-            padding: 4px 10px;
-            border-radius: 12px;
-            font-size: 13px;
-        }
-        
-        .content-header-actions {
-            display: flex;
-            gap: 12px;
-            align-items: center;
-        }
-        
-        .fullscreen-btn {
-            background: #28a745;
-            color: white;
-            border: none;
-            padding: 8px 16px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 14px;
-            display: none;
-        }
-        
-        .fullscreen-btn:hover {
-            background: #218838;
-        }
-        
-        .home-link {
-            color: #007bff;
-            text-decoration: none;
-            font-size: 14px;
-        }
-        
-        .home-link:hover {
-            text-decoration: underline;
-        }
-        
-        .content-body {
-            flex: 1;
-            overflow: auto;
-            padding: 20px;
-        }
-        
-        .welcome {
-            text-align: center;
-            padding: 60px 20px;
-            color: #666;
-        }
-        
-        .code-container {
-            background: white;
-            border: 1px solid #ddd;
-            border-radius: 6px;
-            overflow: hidden;
-        }
-        
-        .code-header {
-            padding: 12px 16px;
-            background: #f8f9fa;
-            border-bottom: 1px solid #ddd;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        
-        .code-filename {
-            font-weight: 600;
-            font-size: 14px;
-        }
-        
-        .copy-btn {
-            background: #007bff;
-            color: white;
-            border: none;
-            padding: 6px 12px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 13px;
-        }
-        
-        .copy-btn:hover {
-            background: #0056b3;
-        }
-        
-        .code-content {
-            padding: 16px;
-            overflow-x: auto;
-        }
-        
-        .code-content pre {
-            margin: 0;
-            font-family: 'Monaco', 'Menlo', monospace;
-            font-size: 13px;
-            line-height: 1.6;
-            white-space: pre-wrap;
-            word-wrap: break-word;
-        }
-        
-        .image-container {
-            background: white;
-            border: 1px solid #ddd;
-            border-radius: 6px;
-            padding: 20px;
-            text-align: center;
-        }
-        
-        .image-container img {
-            max-width: 100%;
-            height: auto;
-            border-radius: 4px;
-        }
-        
-        .html-frame {
-            width: 100%;
-            height: 100%;
-            border: none;
-        }
-        
-        .error {
-            padding: 20px;
-            background: #f8d7da;
-            color: #721c24;
-            border: 1px solid #f5c6cb;
-            border-radius: 4px;
-        }
-        
-        /* 全屏模式 */
-        .fullscreen-mode .sidebar {
-            display: none !important;
-        }
-        
-        .fullscreen-mode .resizer {
-            display: none !important;
-        }
-        
-        .fullscreen-mode .content {
-            width: 100% !important;
-        }
-        
-        .fullscreen-mode .floating-tree-toggle {
-            display: block !important;
-        }
-        
-        /* 浮窗目录 */
-        .floating-tree-toggle {
-            position: fixed;
-            right: 20px;
-            top: 70px;
-            background: #007bff;
-            color: white;
-            border: none;
-            padding: 10px 20px;
-            border-radius: 6px;
-            cursor: pointer;
-            z-index: 998;
-            display: none;
-            font-size: 14px;
-            font-weight: 500;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.25);
-        }
-        
-        .floating-tree-toggle:hover {
-            background: #0056b3;
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-        }
-        
-        .floating-tree {
-            position: fixed;
-            right: 20px;
-            top: 120px;
-            width: 320px;
-            max-height: 70vh;
-            background: white;
-            border: 1px solid #ddd;
-            border-radius: 8px;
-            box-shadow: 0 4px 16px rgba(0,0,0,0.2);
-            z-index: 999;
-            display: none;
-            flex-direction: column;
-        }
-        
-        .floating-tree.show {
-            display: flex;
-        }
-        
-        .floating-tree-header {
-            padding: 12px 16px;
-            background: #f8f9fa;
-            border-bottom: 1px solid #ddd;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            cursor: move;
-            user-select: none;
-        }
-        
-        .floating-tree-header h3 {
-            margin: 0;
-            font-size: 14px;
-            font-weight: 600;
-            color: #333;
-        }
-        
-        .floating-tree-close {
-            background: none;
-            border: none;
-            font-size: 22px;
-            cursor: pointer;
-            color: #999;
-            padding: 0;
-            width: 24px;
-            height: 24px;
-            line-height: 1;
-        }
-        
-        .floating-tree-close:hover {
-            color: #333;
-        }
-        
-        .floating-tree-body {
-            flex: 1;
-            overflow-y: auto;
-            padding: 8px;
-        }
-        /* 暗黑模式 */
-        @media (prefers-color-scheme: dark) {
-            body {
-                background: #1e1e1e;
-                color: #e0e0e0;
-            }
-            
-            .sidebar {
-                background: #252526;
-                border-right-color: #3e3e42;
-            }
-            
-            .sidebar-header {
-                background: #2d2d30;
-                border-bottom-color: #3e3e42;
-            }
-            
-            .sidebar-header h2 {
-                color: #e0e0e0;
-            }
-            
-            .sidebar-controls button {
-                background: #3e3e42;
-                color: #e0e0e0;
-                border-color: #555;
-            }
-            
-            .sidebar-controls button:hover {
-                background: #4e4e52;
-            }
-            
-            .folder-item:hover, .file-item:hover {
-                background: #2a2d2e;
-            }
-            
-            .file-item.active {
-                background: #094771;
-                color: #4fc3f7;
-            }
-            
-            .folder-item, .file-item {
-                color: #cccccc;
-            }
-            
-            .main-content {
-                background: #1e1e1e;
-            }
-            
-            .viewer-header {
-                background: #252526;
-                border-bottom-color: #3e3e42;
-                color: #e0e0e0;
-            }
-            
-            .fullscreen-btn {
-                background: #3e3e42;
-                color: #e0e0e0;
-            }
-            
-            .fullscreen-btn:hover {
-                background: #4e4e52;
-            }
-            
-            .content-area pre {
-                background: #1e1e1e;
-                color: #d4d4d4;
-                border-color: #3e3e42;
-            }
-            
-            .content-area pre code {
-                color: #d4d4d4;
-            }
-            
-            .html-warning {
-                background: #3a2f1f;
-                border-color: #5a4f3f;
-                color: #f0ad4e;
-            }
-            
-            .open-new-tab {
-                background: #5a4f3f;
-                color: #f0ad4e;
-            }
-            
-            .open-new-tab:hover {
-                background: #6a5f4f;
-            }
-            
-            .floating-tree-btn {
-                background: #3e3e42;
-                color: #e0e0e0;
-            }
-            
-            .floating-tree-btn:hover {
-                background: #4e4e52;
-            }
-            
-            .floating-tree {
-                background: #252526;
-                border-color: #3e3e42;
-                box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
-            }
-            
-            .floating-tree-header {
-                background: #2d2d30;
-                border-bottom-color: #3e3e42;
-                color: #e0e0e0;
-            }
-            
-            .floating-tree-close {
-                color: #e0e0e0;
-            }
-            
-            .floating-tree-close:hover {
-                background: #4e4e52;
-            }
-            
-            /* 分页控制暗黑模式 */
-            .content-area > div:last-child {
-                background: #2d2d30 !important;
-                border-top-color: #3e3e42 !important;
-            }
-            
-            .content-area button {
-                background: #3e3e42;
-                color: #e0e0e0;
-                border-color: #555;
-            }
-            
-            .content-area button:hover:not(:disabled) {
-                background: #4e4e52;
-            }
-            
-            .content-area button:disabled {
-                background: #2a2a2a;
-                color: #666;
-            }
-        }
-        /* 移除固定侧边栏 */
-        .sidebar {
-            display: none;
-        }
-        
-        /* 浮动气泡按钮 */
-        .floating-bubble {
-            position: fixed;
-            bottom: 24px;
-            right: 24px;
-            width: 56px;
-            height: 56px;
-            background: #007bff;
-            color: white;
-            border: none;
-            border-radius: 50%;
-            font-size: 24px;
-            cursor: pointer;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-            z-index: 1000;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: all 0.3s;
-        }
-        
-        .floating-bubble:hover {
-            background: #0056b3;
-            transform: scale(1.1);
-            box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
-        }
-        
-        .floating-bubble.hidden {
-            display: none;
-        }
-        
-        /* 浮动目录窗口 */
-        .floating-tree-window {
-            position: fixed;
-            top: 80px;
-            right: 24px;
-            width: 320px;
-            max-width: 90vw;
-            height: 500px;
-            max-height: 70vh;
-            background: white;
-            border-radius: 12px;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
-            display: none;
-            flex-direction: column;
-            z-index: 1001;
-            resize: both;
-            overflow: hidden;
-        }
-        
-        .floating-tree-window.show {
-            display: flex;
-        }
-        
-        /* 窗口标题栏（可拖动） */
-        .floating-tree-titlebar {
-            background: linear-gradient(135deg, #007bff 0%, #0056b3 100%);
-            color: white;
-            padding: 12px 16px;
-            cursor: move;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            user-select: none;
-            border-radius: 12px 12px 0 0;
-        }
-        
-        .floating-tree-titlebar h3 {
-            margin: 0;
-            font-size: 14px;
-            font-weight: 600;
-        }
-        
-        .floating-tree-controls {
-            display: flex;
-            gap: 8px;
-        }
-        
-        .floating-tree-btn {
-            background: rgba(255, 255, 255, 0.2);
-            border: none;
-            color: white;
-            width: 28px;
-            height: 28px;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 16px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: background 0.2s;
-        }
-        
-        .floating-tree-btn:hover {
-            background: rgba(255, 255, 255, 0.3);
-        }
-        
-        /* 窗口内容区 */
-        .floating-tree-content {
-            flex: 1;
-            overflow-y: auto;
-            padding: 12px;
-        }
-        
-        .floating-tree-content .folder-item,
-        .floating-tree-content .file-item {
-            padding: 8px 12px;
-            cursor: pointer;
-            border-radius: 6px;
-            margin: 2px 0;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            font-size: 13px;
-            transition: background 0.2s;
-        }
-        
-        .floating-tree-content .folder-item:hover,
-        .floating-tree-content .file-item:hover {
-            background: #f0f0f0;
-        }
-        
-        .floating-tree-content .file-item.active {
-            background: #e3f2fd;
-            color: #1976d2;
-            font-weight: 500;
-        }
-        
-        .floating-tree-content .folder-icon,
-        .floating-tree-content .file-icon {
-            font-size: 16px;
-            flex-shrink: 0;
-        }
-        
-        .floating-tree-content .folder-children {
-            margin-left: 20px;
-        }
-        
-        /* 主内容区占满全屏 */
-        .main-content {
-            width: 100%;
-            margin-left: 0;
-        }
-        
-        /* 暗黑模式适配 */
-        @media (prefers-color-scheme: dark) {
-            .floating-bubble {
-                background: #3e3e42;
-                color: #e0e0e0;
-            }
-            
-            .floating-bubble:hover {
-                background: #4e4e52;
-            }
-            
-            .floating-tree-window {
-                background: #252526;
-                border: 1px solid #3e3e42;
-            }
-            
-            .floating-tree-titlebar {
-                background: linear-gradient(135deg, #2d2d30 0%, #1e1e1e 100%);
-            }
-            
-            .floating-tree-content .folder-item:hover,
-            .floating-tree-content .file-item:hover {
-                background: #2a2d2e;
-            }
-            
-            .floating-tree-content .file-item.active {
-                background: #094771;
-                color: #4fc3f7;
-            }
-            
-            .floating-tree-content .folder-item,
-            .floating-tree-content .file-item {
-                color: #cccccc;
-            }
-        }
-
-    </style>
 </head>
 <body>
-    <!-- 浮动气泡按钮 -->
-    <button class="floating-bubble" id="floating-bubble" title="打开文件目录">
-        📁
-    </button>
-    
-    <!-- 浮动目录窗口 -->
+    <!-- 浮动气泡按钮：打开文件树窗口 -->
+    <button class="floating-bubble" id="floating-bubble" title="打开文件目录">📁</button>
+
+    <!-- 浮动文件树窗口 -->
     <div class="floating-tree-window" id="floating-tree-window">
         <div class="floating-tree-titlebar" id="floating-tree-titlebar">
             <h3>📁 文件目录</h3>
@@ -729,550 +20,340 @@
             </div>
         </div>
         <div class="floating-tree-content" id="floating-tree-content">
-            <!-- 文件树将在这里渲染 -->
+            <div class="tree-loading">加载中...</div>
         </div>
     </div>
 
-    <div class="container">
-        <main class="main-content">
-            <div class="viewer-header">
-                <h1 id="file-path">{{ .RepoName }}</h1>
+    <!-- 主内容区 -->
+    <main class="main-content">
+        <div class="viewer-header">
+            <div class="repo-info">
+                <h1 id="repo-title">{{ .RepoName }}</h1>
+                <span class="repo-ref" id="repo-ref">{{ .Ref }}</span>
             </div>
-            <div class="content-area" id="content-area">
-                <p style="text-align: center; padding: 40px; color: #999;">选择左侧文件查看内容</p>
+            <div class="content-header-actions">
+                <a href="/" class="home-link">← 首页</a>
             </div>
-        </main>
+        </div>
+        <div class="content-area" id="content-area">
+            <div class="welcome">选择右侧文件目录中的文件查看内容</div>
+        </div>
+    </main>
+
+    <!-- 凭据输入弹窗（私有仓库运行时鉴权） -->
+    <div class="auth-modal" id="auth-modal" style="display:none;">
+        <div class="auth-modal-card">
+            <h2>该仓库需要鉴权</h2>
+            <p>此 Git 仓库无公开访问权限，请输入凭据。凭据仅保存在当前浏览器标签页（sessionStorage），关闭即清除，不会上传服务器存储。</p>
+            <div class="auth-form">
+                <select id="auth-type">
+                    <option value="token">Token</option>
+                    <option value="basic">账号密码</option>
+                </select>
+                <input type="password" id="auth-token" placeholder="Token" autocomplete="off">
+                <input type="text" id="auth-username" placeholder="用户名" autocomplete="off" style="display:none;">
+                <input type="password" id="auth-password" placeholder="密码" autocomplete="off" style="display:none;">
+                <div class="auth-actions">
+                    <button id="auth-cancel">取消</button>
+                    <button id="auth-submit" class="primary">确认</button>
+                </div>
+            </div>
+        </div>
     </div>
+
 <script>
-        const pathID = '{{ .PathID }}';
-        let currentPath = '';
-        let fullscreenMode = false;
-        let allFiles = [];
-        
-        // 初始化
-        document.addEventListener('DOMContentLoaded', () => {
-            loadFileTree();
-            initResizer();
-            initSidebarToggle();
-            initHiddenToggle();
-            initFullscreenMode();
-            updateRepoName();
-            initFloatingTree();
+(function () {
+    const pathID = '{{ .PathID }}';
+    const repoName = '{{ .RepoName }}';
+    const STORAGE_KEY = 'gitweb_auth_' + pathID;
+    let allFiles = [];
+    let currentPath = '';
+    let authResolve = null; // 凭据弹窗的 resolve
+
+    // ---------- 凭据（sessionStorage，仅当前标签页） ----------
+    function getStoredAuth() {
+        try { return JSON.parse(sessionStorage.getItem(STORAGE_KEY)); } catch (e) { return null; }
+    }
+    function storeAuth(auth) { sessionStorage.setItem(STORAGE_KEY, JSON.stringify(auth)); }
+    function authHeader() {
+        const a = getStoredAuth();
+        if (!a) return {};
+        if (a.type === 'token') return { 'Authorization': 'Bearer ' + a.token };
+        if (a.type === 'basic') return { 'Authorization': 'Basic ' + btoa(a.username + ':' + a.password) };
+        return {};
+    }
+
+    // 带鉴权的 fetch：401 时弹窗要凭据，输入后重试一次。
+    async function authFetch(url, opts) {
+        opts = opts || {};
+        opts.headers = Object.assign({}, opts.headers || {}, authHeader());
+        let resp = await fetch(url, opts);
+        if (resp.status === 401) {
+            await promptAuth();
+            opts.headers = Object.assign({}, opts.headers || {}, authHeader());
+            resp = await fetch(url, opts);
+        }
+        return resp;
+    }
+
+    // 弹出凭据输入框，返回 Promise（用户确认后 resolve）
+    function promptAuth() {
+        if (authResolve) return authResolve; // 已有弹窗
+        const modal = document.getElementById('auth-modal');
+        modal.style.display = 'flex';
+        return new Promise(resolve => {
+            authResolve = resolve;
         });
-        
-        // 加载文件树
-        async function loadFileTree() {
-            try {
-                const res = await fetch(`/api/sites/${pathID}/tree`);
-                if (!res.ok) throw new Error('Failed to load tree');
-                
-                const data = await res.json();
-                allFiles = data.files || [];
-                renderTree(allFiles);
-            } catch (err) {
-                document.getElementById('floating-tree-content').innerHTML = 
-                    '<div class="error">加载文件树失败: ' + err.message + '</div>';
-            }
-        }
-        
-        // 渲染文件树
-        function renderTree(files) {
-            if (files.length === 0) {
-                document.getElementById('floating-tree-content').innerHTML = 
-                    '<div style="text-align:center;padding:20px;color:#999;">空仓库</div>';
+    }
+    function closeAuth(auth) {
+        document.getElementById('auth-modal').style.display = 'none';
+        const resolve = authResolve;
+        authResolve = null;
+        if (resolve) resolve(auth);
+    }
+
+    document.getElementById('auth-type').addEventListener('change', e => {
+        const t = e.target.value;
+        document.getElementById('auth-token').style.display = t === 'token' ? 'block' : 'none';
+        document.getElementById('auth-username').style.display = t === 'basic' ? 'block' : 'none';
+        document.getElementById('auth-password').style.display = t === 'basic' ? 'block' : 'none';
+    });
+    document.getElementById('auth-cancel').addEventListener('click', () => closeAuth(null));
+    document.getElementById('auth-submit').addEventListener('click', () => {
+        const type = document.getElementById('auth-type').value;
+        const auth = { type };
+        if (type === 'token') auth.token = document.getElementById('auth-token').value;
+        else { auth.username = document.getElementById('auth-username').value; auth.password = document.getElementById('auth-password').value; }
+        storeAuth(auth);
+        closeAuth(auth);
+    });
+
+    // ---------- 文件树 ----------
+    async function loadFileTree() {
+        try {
+            const resp = await authFetch('/api/sites/' + pathID + '/tree');
+            if (!resp.ok) {
+                document.getElementById('floating-tree-content').innerHTML =
+                    '<div class="tree-error">加载文件树失败（' + resp.status + '）</div>';
                 return;
             }
-            
-            const tree = buildTree(files);
-            const html = renderNode(tree, 0);
-            document.getElementById('floating-tree-content').innerHTML = html;
-            
-            attachFileClickEvents();
+            const data = await resp.json();
+            allFiles = data.files || [];
+            renderTree(allFiles);
+        } catch (err) {
+            document.getElementById('floating-tree-content').innerHTML =
+                '<div class="tree-error">加载文件树失败: ' + err.message + '</div>';
         }
-        
-        // 构建树结构
-        function buildTree(files) {
-            const root = { _files: [], _dirs: {} };
-            
-            files.forEach(file => {
-                const parts = file.path.split('/');
-                let current = root;
-                
-                for (let i = 0; i < parts.length - 1; i++) {
-                    const part = parts[i];
-                    if (!current._dirs[part]) {
-                        current._dirs[part] = { _files: [], _dirs: {} };
-                    }
-                    current = current._dirs[part];
-                }
-                
-                current._files.push({
-                    name: parts[parts.length - 1],
-                    path: file.path,
-                    size: file.size
-                });
-            });
-            
-            return root;
-        }
-        
-        // 渲染节点
-        function renderNode(node, level) {
-            let html = '';
-            
-            // 渲染目录
-            const dirs = Object.keys(node._dirs).sort();
-            dirs.forEach(dirName => {
-                const isHidden = dirName.startsWith('.');
-                const hiddenClass = isHidden ? 'hidden-item' : '';
-                
-                html += `<div class="folder-item ${hiddenClass}" data-level="${level}" style="padding-left: ${level * 16}px">
-                    <span class="folder-icon">📁</span>
-                    <span class="folder-name">${dirName}</span>
-                </div>`;
-                html += `<div class="dir-content" style="display: none;">`;
-                html += renderNode(node._dirs[dirName], level + 1);
-                html += `</div>`;
-            });
-            
-            // 渲染文件
-            if (node._files) {
-                node._files.sort((a, b) => a.name.localeCompare(b.name));
-                node._files.forEach(file => {
-                    const isHidden = file.name.startsWith('.');
-                    const hiddenClass = isHidden ? 'hidden-item' : '';
-                    const sizeLabel = file.size > 0 ? ` (${formatSize(file.size)})` : '';
-                    
-                    html += `<div class="file-item ${hiddenClass}" data-path="${file.path}" data-size="${file.size}" data-level="${level}" style="padding-left: ${level * 16 + 16}px">
-                        <span class="file-icon">📄</span>
-                        <span class="file-name">${file.name}</span>
-                        <span class="file-size">${sizeLabel}</span>
-                    </div>`;
-                });
+    }
+
+    function buildTree(files) {
+        const root = { _files: [], _dirs: {} };
+        files.forEach(file => {
+            const parts = file.path.split('/');
+            let cur = root;
+            for (let i = 0; i < parts.length - 1; i++) {
+                if (!cur._dirs[parts[i]]) cur._dirs[parts[i]] = { _files: [], _dirs: {} };
+                cur = cur._dirs[parts[i]];
             }
-            
-            return html;
-        }
-        
-        // 附加点击事件
-        function attachFileClickEvents() {
-            // 文件点击
-            document.querySelectorAll('.file-item').forEach(item => {
-                item.addEventListener('click', () => {
-                    const path = item.dataset.path;
-                    loadFile(path);
-                    
-                    document.querySelectorAll('.file-item').forEach(f => f.classList.remove('active'));
-                    document.querySelectorAll(`.file-item[data-path="${path}"]`).forEach(f => f.classList.add('active'));
-                });
+            cur._files.push({ name: parts[parts.length - 1], path: file.path, size: file.size });
+        });
+        return root;
+    }
+
+    function renderTree(files) {
+        const container = document.getElementById('floating-tree-content');
+        if (!files.length) { container.innerHTML = '<div class="tree-empty">空仓库</div>'; return; }
+        container.innerHTML = renderNode(buildTree(files), 0);
+        attachTreeEvents();
+    }
+
+    function renderNode(node, level) {
+        let html = '';
+        Object.keys(node._dirs).sort().forEach(dir => {
+            html += '<div class="folder-item" data-level="' + level + '" style="padding-left:' + (level * 16) + 'px">'
+                + '<span class="folder-icon">📁</span><span class="folder-name">' + escapeHtml(dir) + '</span></div>'
+                + '<div class="folder-children" style="display:none">' + renderNode(node._dirs[dir], level + 1) + '</div>';
+        });
+        node._files.sort((a, b) => a.name.localeCompare(b.name));
+        node._files.forEach(file => {
+            html += '<div class="file-item" data-path="' + escapeHtml(file.path) + '" data-level="' + level + '" style="padding-left:' + (level * 16 + 16) + 'px">'
+                + '<span class="file-icon">📄</span><span class="file-name">' + escapeHtml(file.name) + '</span>'
+                + '<span class="file-size">' + (file.size > 0 ? ' ' + formatSize(file.size) : '') + '</span></div>';
+        });
+        return html;
+    }
+
+    function attachTreeEvents() {
+        document.querySelectorAll('.file-item').forEach(item => {
+            item.addEventListener('click', () => {
+                const path = item.dataset.path;
+                loadFile(path);
+                document.querySelectorAll('.file-item').forEach(f => f.classList.remove('active'));
+                item.classList.add('active');
             });
-            
-            // 文件夹展开/收起
-            document.querySelectorAll('.folder-item').forEach(item => {
-                item.addEventListener('click', () => {
-                    const content = item.nextElementSibling;
-                    if (content && content.classList.contains('dir-content')) {
-                        if (content.style.display === 'none') {
-                            content.style.display = 'block';
-                            item.querySelector('.folder-icon').textContent = '📂';
-                        } else {
-                            content.style.display = 'none';
-                            item.querySelector('.folder-icon').textContent = '📁';
-                        }
-                    }
-                });
+        });
+        document.querySelectorAll('.folder-item').forEach(item => {
+            item.addEventListener('click', () => {
+                const next = item.nextElementSibling;
+                if (next && next.classList.contains('folder-children')) {
+                    const open = next.style.display !== 'none';
+                    next.style.display = open ? 'none' : 'block';
+                    item.querySelector('.folder-icon').textContent = open ? '📁' : '📂';
+                }
             });
-        }
-        
-        // 加载文件（带分页）
-        async function loadFile(path) {
-            currentPath = path;
-            const contentBody = document.getElementById('content-body');
-            const fullscreenBtn = document.getElementById('fullscreen-btn');
-            
-            contentBody.innerHTML = '<div style="text-align:center;padding:40px">加载中...</div>';
-            
-            // HTML 文件特殊处理
-            if (path.toLowerCase().endsWith('.html') || path.toLowerCase().endsWith('.htm')) {
-                fullscreenBtn.style.display = 'inline-block';
-                
-                const notice = document.createElement('div');
-                notice.style.cssText = 'padding: 20px; background: #fff3cd; border: 1px solid #ffc107; border-radius: 4px; margin-bottom: 10px;';
-                notice.innerHTML = `
-                    <p style="margin: 0 0 10px 0; color: #856404;">
-                        ⚠️ 某些 HTML 文件可能禁止在 iframe 中显示。如果下方显示空白或异常，请点击下面的按钮在新标签页中打开：
-                    </p>
-                    <a href="/${pathID}/${path}" target="_blank" 
-                       style="display: inline-block; padding: 8px 16px; background: #007bff; color: white; text-decoration: none; border-radius: 4px;">
-                        🔗 在新标签页打开
-                    </a>
-                `;
-                
-                const iframe = document.createElement('iframe');
-                iframe.className = 'html-frame';
-                iframe.src = `/${pathID}/${path}`;
-                
-                contentBody.innerHTML = '';
-                contentBody.appendChild(notice);
-                contentBody.appendChild(iframe);
-                
-                iframe.onerror = () => {
-                    iframe.style.display = 'none';
-                    notice.innerHTML = `
-                        <p style="margin: 0 0 10px 0; color: #856404;">
-                            ❌ 无法在 iframe 中加载此 HTML 文件（可能有安全限制）。请点击下面的按钮在新标签页中打开：
-                        </p>
-                        <a href="/${pathID}/${path}" target="_blank" 
-                           style="display: inline-block; padding: 8px 16px; background: #007bff; color: white; text-decoration: none; border-radius: 4px;">
-                            🔗 在新标签页打开
-                        </a>
-                    `;
-                };
-                
+        });
+    }
+
+    // ---------- 文件加载 ----------
+    async function loadFile(path) {
+        currentPath = path;
+        const area = document.getElementById('content-area');
+        area.innerHTML = '<div class="welcome">加载中...</div>';
+
+        const lower = path.toLowerCase();
+        try {
+            // HTML：iframe sandbox 承载（不加 allow-scripts，防恶意脚本逃逸）
+            if (lower.endsWith('.html') || lower.endsWith('.htm')) {
+                renderHTMLInIframe(path);
                 return;
             }
-            
-            fullscreenBtn.style.display = 'none';
-            
-            // 图片文件
-            if (/\.(jpg|jpeg|png|gif|bmp|svg|webp)$/i.test(path)) {
-                contentBody.innerHTML = `
-                    <div class="image-container">
-                        <img src="/${pathID}/${path}" alt="${path}">
-                    </div>
-                `;
+            // 图片：直接 <img>
+            if (/\.(png|jpe?g|gif|bmp|webp|svg|ico)$/i.test(path)) {
+                area.innerHTML = '<div class="image-container"><img src="/' + pathID + '/' + encodeURI(path) + '" alt="' + escapeHtml(path) + '"></div>';
                 return;
             }
-            
-            // 其他文件（代码）- 带分页
-            try {
-                const res = await fetch(`/${pathID}/${path}`);
-                if (!res.ok) throw new Error('File not found');
-                
-                const content = await res.text();
-                const lines = content.split('\n');
-                const totalLines = lines.length;
-                const maxLines = 500; // 每页显示500行
-                
-                let currentPage = 0;
-                const totalPages = Math.ceil(totalLines / maxLines);
-                
-                function renderPage(page) {
-                    const start = page * maxLines;
-                    const end = Math.min(start + maxLines, totalLines);
-                    const pageContent = lines.slice(start, end).join('\n');
-                    
-                    const container = document.createElement('div');
-                    container.className = 'code-container';
-                    
-                    container.innerHTML = `
-                        <div class="code-header">
-                            <span class="code-filename">${path} ${totalLines > maxLines ? `(行 ${start + 1}-${end} / ${totalLines})` : ''}</span>
-                            <div style="display: flex; gap: 8px;">
-                                ${totalLines > maxLines ? `<span style="color: #666; font-size: 13px;">第 ${page + 1}/${totalPages} 页</span>` : ''}
-                                <button class="copy-btn" onclick="copyCode()">📋 复制当前页</button>
-                            </div>
-                        </div>
-                        <div class="code-content">
-                            <pre id="code-content">${escapeHtml(pageContent)}</pre>
-                        </div>
-                    `;
-                    
-                    if (totalLines > maxLines) {
-                        const pagination = document.createElement('div');
-                        pagination.style.cssText = 'padding: 16px; background: #f8f9fa; border-top: 1px solid #ddd; display: flex; justify-content: center; gap: 12px; align-items: center;';
-                        
-                        const prevBtn = document.createElement('button');
-                        prevBtn.textContent = '← 上一页';
-                        prevBtn.className = 'copy-btn';
-                        prevBtn.disabled = page === 0;
-                        prevBtn.style.opacity = page === 0 ? '0.5' : '1';
-                        prevBtn.onclick = () => {
-                            currentPage--;
-                            contentBody.innerHTML = '';
-                            contentBody.appendChild(renderPage(currentPage));
-                            contentBody.scrollTop = 0;
-                        };
-                        
-                        const nextBtn = document.createElement('button');
-                        nextBtn.textContent = '下一页 →';
-                        nextBtn.className = 'copy-btn';
-                        nextBtn.disabled = page === totalPages - 1;
-                        nextBtn.style.opacity = page === totalPages - 1 ? '0.5' : '1';
-                        nextBtn.onclick = () => {
-                            currentPage++;
-                            contentBody.innerHTML = '';
-                            contentBody.appendChild(renderPage(currentPage));
-                            contentBody.scrollTop = 0;
-                        };
-                        
-                        const downloadBtn = document.createElement('button');
-                        downloadBtn.textContent = '💾 下载完整文件';
-                        downloadBtn.className = 'copy-btn';
-                        downloadBtn.style.background = '#28a745';
-                        downloadBtn.onclick = () => {
-                            const blob = new Blob([content], { type: 'text/plain' });
-                            const url = URL.createObjectURL(blob);
-                            const a = document.createElement('a');
-                            a.href = url;
-                            a.download = path.split('/').pop();
-                            a.click();
-                            URL.revokeObjectURL(url);
-                        };
-                        
-                        pagination.appendChild(prevBtn);
-                        pagination.appendChild(document.createTextNode(`${page + 1} / ${totalPages}`));
-                        pagination.appendChild(nextBtn);
-                        pagination.appendChild(downloadBtn);
-                        
-                        container.appendChild(pagination);
-                    }
-                    
-                    return container;
-                }
-                
-                contentBody.innerHTML = '';
-                contentBody.appendChild(renderPage(currentPage));
-                
-            } catch (err) {
-                contentBody.innerHTML = `<div class="error">加载文件失败: ${err.message}</div>`;
+            // md/txt/代码：后端返回 HTML 片段，前端注入。长内容前端分页。
+            const resp = await authFetch('/' + pathID + '/' + encodeURI(path));
+            if (!resp.ok) { area.innerHTML = '<div class="error">加载失败（' + resp.status + '）</div>'; return; }
+            const html = await resp.text();
+            renderTextWithPagination(area, path, html);
+        } catch (err) {
+            area.innerHTML = '<div class="error">加载失败: ' + err.message + '</div>';
+        }
+    }
+
+    function renderHTMLInIframe(path) {
+        const area = document.getElementById('content-area');
+        const notice = document.createElement('div');
+        notice.className = 'html-notice';
+        notice.innerHTML = '⚠️ HTML 在隔离的沙箱中显示（禁用脚本）。'
+            + '<a href="/' + pathID + '/' + encodeURI(path) + '" target="_blank">在新标签页打开</a>';
+        const iframe = document.createElement('iframe');
+        iframe.className = 'html-frame';
+        iframe.src = '/' + pathID + '/' + encodeURI(path);
+        // sandbox 不加 allow-scripts：防不可信仓库的恶意脚本执行
+        iframe.setAttribute('sandbox', 'allow-same-origin');
+        area.innerHTML = '';
+        area.appendChild(notice);
+        area.appendChild(iframe);
+    }
+
+    // 前端分页：按渲染片段的行数切，每页 maxLines 行。
+    function renderTextWithPagination(area, path, html) {
+        // html 是后端渲染的片段（<pre><code>... 或 markdown 的 HTML）
+        // 检测是否为 <pre><code>（纯文本），按行切；markdown 内容不分页（避免截断标签）
+        if (html.startsWith('<pre><code>')) {
+            const raw = html.slice('<pre><code>'.length, html.length - '</code></pre>'.length);
+            const lines = raw.split('\n');
+            const maxLines = 1000;
+            if (lines.length <= maxLines) {
+                area.innerHTML = '<div class="code-container"><div class="code-content"><pre><code>' + raw + '</code></pre></div></div>';
+                return;
+            }
+            let page = 0;
+            const totalPages = Math.ceil(lines.length / maxLines);
+            function renderPage(p) {
+                const start = p * maxLines, end = Math.min(start + maxLines, lines.length);
+                const pageContent = lines.slice(start, end).join('\n');
+                const container = document.createElement('div');
+                container.className = 'code-container';
+                container.innerHTML = '<div class="code-header"><span class="code-filename">' + escapeHtml(path)
+                    + ' (行 ' + (start + 1) + '-' + end + ' / ' + lines.length + ')</span></div>'
+                    + '<div class="code-content"><pre><code>' + pageContent + '</code></pre></div>';
+                const pager = document.createElement('div');
+                pager.className = 'pagination';
+                pager.innerHTML = '<button ' + (p === 0 ? 'disabled' : '') + ' data-p="' + (p - 1) + '">上一页</button>'
+                    + '<span>第 ' + (p + 1) + ' / ' + totalPages + ' 页</span>'
+                    + '<button ' + (p === totalPages - 1 ? 'disabled' : '') + ' data-p="' + (p + 1) + '">下一页</button>';
+                pager.querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
+                    const np = parseInt(b.dataset.p, 10);
+                    if (!isNaN(np)) renderPage(np);
+                }));
+                container.appendChild(pager);
+                area.innerHTML = '';
+                area.appendChild(container);
+                area.scrollTop = 0;
+            }
+            renderPage(page);
+        } else {
+            // markdown 渲染结果：直接注入（不分页，goldmark 已是结构化 HTML）
+            area.innerHTML = '<div class="markdown-body">' + html + '</div>';
+        }
+    }
+
+    // ---------- 首屏：自动加载 README ----------
+    function autoOpenDefault() {
+        const candidates = ['README.md', 'readme.md', 'README.MD', 'index.html', 'README.txt', 'README'];
+        for (const c of candidates) {
+            if (allFiles.some(f => f.path === c || f.path.endsWith('/' + c))) {
+                loadFile(c);
+                // 高亮文件树
+                const target = document.querySelector('.file-item[data-path="' + c + '"]');
+                if (target) target.classList.add('active');
+                return;
             }
         }
-        
-        // 工具函数
-        function formatSize(bytes) {
-            if (bytes < 1024) return bytes + ' B';
-            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-            return (bytes / 1024 / 1024).toFixed(1) + ' MB';
-        }
-        
-        function escapeHtml(text) {
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
-        }
-        
-        function copyCode() {
-            const code = document.getElementById('code-content').textContent;
-            navigator.clipboard.writeText(code).then(() => {
-                alert('已复制到剪贴板');
-            });
-        }
-        
-        function updateRepoName() {
-            const repoName = document.getElementById('repo-name').textContent;
-            if (repoName.includes('github.com')) {
-                const match = repoName.match(/github\.com\/([^\/]+\/[^\/]+)/);
-                if (match) {
-                    document.getElementById('repo-name').textContent = match[1];
-                }
-        
-        // 初始化浮动窗口
-        function initFloatingTree() {
-            const floatingWindow = document.getElementById('floating-tree-window');
-            const titlebar = document.getElementById('floating-tree-titlebar');
-            const bubble = document.getElementById('floating-bubble');
-            const minimizeBtn = document.getElementById('minimize-btn');
-            const closeBtn = document.getElementById('close-btn');
-            
-            if (!floatingWindow || !bubble) return;
-            
-            let isDragging = false;
-            let currentX, currentY, initialX, initialY;
-            
-            // 气泡按钮点击 - 显示窗口
-            bubble.addEventListener('click', () => {
-                floatingWindow.classList.add('show');
-                bubble.classList.add('hidden');
-            });
-            
-            // 缩小按钮 - 缩为气泡
-            minimizeBtn.addEventListener('click', () => {
-                floatingWindow.classList.remove('show');
-                bubble.classList.remove('hidden');
-            });
-            
-            // 关闭按钮
-            closeBtn.addEventListener('click', () => {
-                floatingWindow.classList.remove('show');
-                bubble.classList.remove('hidden');
-            });
-            
-            // 拖动开始
-            titlebar.addEventListener('mousedown', (e) => {
-                isDragging = true;
-                initialX = e.clientX - floatingWindow.offsetLeft;
-                initialY = e.clientY - floatingWindow.offsetTop;
-                titlebar.style.cursor = 'grabbing';
-            });
-            
-            // 拖动中
-            document.addEventListener('mousemove', (e) => {
-                if (isDragging) {
-                    e.preventDefault();
-                    currentX = e.clientX - initialX;
-                    currentY = e.clientY - initialY;
-                    
-                    const maxX = window.innerWidth - floatingWindow.offsetWidth;
-                    const maxY = window.innerHeight - floatingWindow.offsetHeight;
-                    
-                    currentX = Math.max(0, Math.min(currentX, maxX));
-                    currentY = Math.max(0, Math.min(currentY, maxY));
-                    
-                    floatingWindow.style.left = currentX + 'px';
-                    floatingWindow.style.top = currentY + 'px';
-                    floatingWindow.style.right = 'auto';
-                }
-            });
-            
-            // 拖动结束
-            document.addEventListener('mouseup', () => {
-                if (isDragging) {
-                    isDragging = false;
-                    titlebar.style.cursor = 'move';
-                }
-            });
-        }
-            }
-        }
-        
-        // 侧边栏拖动
-        function initResizer() {
-            const sidebar = document.getElementById('sidebar');
-            if (!sidebar) return;
-            const resizer = document.getElementById('resizer');
-            const sidebar = document.getElementById('sidebar');
-            let isResizing = false;
-            
-            resizer.addEventListener('mousedown', (e) => {
-                isResizing = true;
-                document.body.style.cursor = 'col-resize';
-                document.body.style.userSelect = 'none';
-            });
-            
-            document.addEventListener('mousemove', (e) => {
-                if (!isResizing) return;
-                
-                const newWidth = e.clientX;
-                if (newWidth >= 200 && newWidth <= 600) {
-                    sidebar.style.width = newWidth + 'px';
-                }
-            });
-            
-            document.addEventListener('mouseup', () => {
-                isResizing = false;
-                document.body.style.cursor = '';
-                document.body.style.userSelect = '';
-            });
-        }
-        
-        // 侧边栏收起/展开
-        function initSidebarToggle() {
-            const toggle = document.getElementById('sidebar-toggle');
-            if (!toggle) return;
-            const sidebar = document.getElementById('sidebar');
-            const resizer = document.getElementById('resizer');
-            const content = document.querySelector('.content');
-            let collapsed = false;
-            
-            toggle.addEventListener('click', () => {
-                collapsed = !collapsed;
-                if (collapsed) {
-                    sidebar.style.width = '0';
-                    sidebar.style.minWidth = '0';
-                    sidebar.style.overflow = 'hidden';
-                    resizer.style.display = 'none';
-                    content.style.width = '100%';
-                    content.style.marginLeft = '0';
-                    toggle.textContent = '▶';
-                    toggle.style.position = 'fixed';
-                    toggle.style.left = '10px';
-                    toggle.style.top = '10px';
-                    toggle.style.zIndex = '200';
-                } else {
-                    sidebar.style.width = '300px';
-                    sidebar.style.minWidth = '200px';
-                    sidebar.style.overflow = '';
-                    resizer.style.display = 'block';
-                    content.style.width = '';
-                    content.style.marginLeft = '';
-                    toggle.textContent = '◀';
-                    toggle.style.position = '';
-                    toggle.style.left = '';
-                    toggle.style.top = '';
-                    toggle.style.zIndex = '';
-                }
-            });
-        }
-        
-        // 显示/隐藏隐藏文件
-        function initHiddenToggle() {
-            const checkbox = document.getElementById('show-hidden');
-            checkbox.addEventListener('change', () => {
-                document.querySelectorAll('.hidden-item').forEach(item => {
-                    item.style.display = checkbox.checked ? '' : 'none';
-                });
-            });
-            
-            // 默认隐藏
-            document.querySelectorAll('.hidden-item').forEach(item => {
-                item.style.display = 'none';
-            });
-        }
-        
-        // 全屏模式
-        function initFullscreenMode() {
-            const fullscreenBtn = document.getElementById('fullscreen-btn');
-            const floatingToggle = document.getElementById('floating-tree-toggle');
-            const floatingTree = document.getElementById('floating-tree');
-            const floatingClose = document.getElementById('floating-tree-close');
-            const container = document.getElementById('main-container');
-            
-            fullscreenBtn.addEventListener('click', () => {
-                fullscreenMode = !fullscreenMode;
-                if (fullscreenMode) {
-                    container.classList.add('fullscreen-mode');
-                    fullscreenBtn.textContent = '↩️ 退出全屏';
-                } else {
-                    container.classList.remove('fullscreen-mode');
-                    floatingTree.classList.remove('show');
-                    fullscreenBtn.textContent = '🖥️ 全屏模式';
-                }
-            });
-            
-            floatingToggle.addEventListener('click', () => {
-                floatingTree.classList.toggle('show');
-            });
-            
-            floatingClose.addEventListener('click', () => {
-                floatingTree.classList.remove('show');
-            });
-            
-            // 浮窗拖动
-            let isDragging = false;
-            let currentX, currentY, initialX, initialY;
-            
-            document.getElementById('floating-tree-header').addEventListener('mousedown', (e) => {
-                if (e.target.tagName === 'BUTTON') return;
-                isDragging = true;
-                initialX = e.clientX - floatingTree.offsetLeft;
-                initialY = e.clientY - floatingTree.offsetTop;
-            });
-            
-            document.addEventListener('mousemove', (e) => {
-                if (!isDragging) return;
-                e.preventDefault();
-                currentX = e.clientX - initialX;
-                currentY = e.clientY - initialY;
-                floatingTree.style.right = 'auto';
-                floatingTree.style.left = currentX + 'px';
-                floatingTree.style.top = currentY + 'px';
-            });
-            
-            document.addEventListener('mouseup', () => {
-                isDragging = false;
-            });
-        }
-    </script>
+    }
+
+    // ---------- 浮窗交互 ----------
+    function initFloatingTree() {
+        const win = document.getElementById('floating-tree-window');
+        const titlebar = document.getElementById('floating-tree-titlebar');
+        const bubble = document.getElementById('floating-bubble');
+        const minimize = document.getElementById('minimize-btn');
+        const closeBtn = document.getElementById('close-btn');
+        if (!win || !bubble) return;
+
+        bubble.addEventListener('click', () => { win.classList.add('show'); bubble.classList.add('hidden'); });
+        minimize.addEventListener('click', () => { win.classList.remove('show'); bubble.classList.remove('hidden'); });
+        closeBtn.addEventListener('click', () => { win.classList.remove('show'); bubble.classList.remove('hidden'); });
+
+        let dragging = false, ox = 0, oy = 0;
+        titlebar.addEventListener('mousedown', e => {
+            if (e.target.tagName === 'BUTTON') return;
+            dragging = true;
+            ox = e.clientX - win.offsetLeft;
+            oy = e.clientY - win.offsetTop;
+            titlebar.style.cursor = 'grabbing';
+        });
+        document.addEventListener('mousemove', e => {
+            if (!dragging) return;
+            e.preventDefault();
+            const x = Math.max(0, Math.min(e.clientX - ox, window.innerWidth - win.offsetWidth));
+            const y = Math.max(0, Math.min(e.clientY - oy, window.innerHeight - win.offsetHeight));
+            win.style.left = x + 'px'; win.style.top = y + 'px'; win.style.right = 'auto';
+        });
+        document.addEventListener('mouseup', () => { if (dragging) { dragging = false; titlebar.style.cursor = 'move'; } });
+
+        // 默认展开浮窗
+        win.classList.add('show');
+        bubble.classList.add('hidden');
+    }
+
+    // ---------- 工具 ----------
+    function escapeHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+    function formatSize(b) {
+        if (b < 1024) return b + ' B';
+        if (b < 1048576) return (b / 1024).toFixed(1) + ' KB';
+        return (b / 1048576).toFixed(1) + ' MB';
+    }
+
+    // ---------- 启动 ----------
+    document.addEventListener('DOMContentLoaded', () => {
+        initFloatingTree();
+        loadFileTree().then(autoOpenDefault);
+    });
+})();
+</script>
 </body>
 </html>

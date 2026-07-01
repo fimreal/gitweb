@@ -1,6 +1,7 @@
 base_url: http://localhost:8080
 listen: ":8080"
-admin_token: ""  # Set a secure token to protect registration API
+# No admin_token: this is a public service. Registration is open.
+# Abuse is bounded by SSRF protection, file-size limits, and cache/timeout caps.
 
 cache:
   ttl: 60s
@@ -12,13 +13,17 @@ fetch:
   https_only: false
   http_proxy: ""   # e.g., http://192.168.10.1:54122
   https_proxy: ""  # e.g., http://192.168.10.1:54122
+  # SSRF: allow/deny wildcards (*.gitea.*). Private/loopback/link-local IPs
+  # are blocked by default regardless of these lists.
   allow_hosts: []
-  deny_hosts: ["127.0.0.1", "localhost", "*.local"]
+  deny_hosts: []
 
 sites:
   - git_url: https://github.com/username/repo
     pathid: example
     ref: main
+    # auth is only for preloaded private repos. For repos registered at runtime,
+    # enter credentials in the browser when the repo is opened.
     # auth:
     #   type: token
     #   token: ${GITHUB_TOKEN}

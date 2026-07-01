@@ -66,26 +66,6 @@
         const form = document.getElementById('register-form');
         if (!form) return;
 
-        const authType = document.getElementById('auth_type');
-        const tokenInput = document.getElementById('token');
-        const usernameInput = document.getElementById('username');
-        const passwordInput = document.getElementById('password');
-
-        if (authType) {
-            authType.addEventListener('change', () => {
-                tokenInput.style.display = 'none';
-                usernameInput.style.display = 'none';
-                passwordInput.style.display = 'none';
-
-                if (authType.value === 'token') {
-                    tokenInput.style.display = 'block';
-                } else if (authType.value === 'basic') {
-                    usernameInput.style.display = 'block';
-                    passwordInput.style.display = 'block';
-                }
-            });
-        }
-
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
 
@@ -96,20 +76,6 @@
                 pathid: pathidInput && pathidInput.trim() !== '' ? pathidInput.trim() : undefined,
                 ref: formData.get('ref') || 'main'
             };
-
-            const authType = formData.get('auth_type');
-            if (authType === 'token') {
-                payload.auth = {
-                    type: 'token',
-                    token: formData.get('token')
-                };
-            } else if (authType === 'basic') {
-                payload.auth = {
-                    type: 'basic',
-                    username: formData.get('username'),
-                    password: formData.get('password')
-                };
-            }
 
             try {
                 const response = await fetch('/api/sites', {

@@ -2,11 +2,10 @@ package server
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
-	"net/url"
 	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -16,23 +15,27 @@ import (
 	"github.com/limingrui/gitweb/internal/render"
 )
 
+// viewerCSP 是 viewer 页面与文件内容响应下发的严格 CSP：
+// 限制脚本来源为同源，防止用户仓库 HTML 的脚本逃逸；图片允许任意源与 data/blob；
+// frame-src 允许同源 iframe（承载用户 HTML）。
+const viewerCSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; " +
+	"img-src 'self' data: blob: *; connect-src 'self'; frame-src 'self'"
+
 type Server struct {
 	registry    *registry.Registry
 	provider    *provider.Manager
 	cache       *cache.Cache
 	renderer    *render.Renderer
-	adminToken  string
 	baseURL     string
 	maxFileSize int64
 }
 
-func New(reg *registry.Registry, prov *provider.Manager, c *cache.Cache, rend *render.Renderer, adminToken, baseURL string, maxFileSize int64) *Server {
+func New(reg *registry.Registry, prov *provider.Manager, c *cache.Cache, rend *render.Renderer, baseURL string, maxFileSize int64) *Server {
 	return &Server{
 		registry:    reg,
 		provider:    prov,
 		cache:       c,
 		renderer:    rend,
-		adminToken:  adminToken,
 		baseURL:     baseURL,
 		maxFileSize: maxFileSize,
 	}
@@ -46,33 +49,18 @@ func (s *Server) SetupRoutes() *gin.Engine {
 
 	api := r.Group("/api")
 	{
-		api.POST("/sites", s.authMiddleware(), s.handleRegisterSite)
-		api.GET("/sites", s.authMiddleware(), s.handleListSites)
-		api.DELETE("/sites/:pathid", s.authMiddleware(), s.handleDeleteSite)
-		api.POST("/sites/:pathid/refresh", s.authMiddleware(), s.handleRefreshSite)
+		api.POST("/sites", s.handleRegisterSite)
+		api.GET("/sites", s.handleListSites)
+		api.DELETE("/sites/:pathid", s.handleDeleteSite)
+		api.POST("/sites/:pathid/refresh", s.handleRefreshSite)
 		api.GET("/sites/:pathid/tree", s.handleGetTree)
 	}
 
+	// /:pathid/*filepath 同时承载 viewer 页面（空 filepath）与文件内容（有 filepath）。
+	// Gin 不允许 catch-all 与独立 /:pathid/ 路由共存，故合并到一条路由，空路径走 viewer。
 	r.GET("/:pathid/*filepath", s.handleSiteFile)
 
 	return r
-}
-
-func (s *Server) authMiddleware() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		if s.adminToken == "" {
-			c.Next()
-			return
-		}
-
-		auth := c.GetHeader("Authorization")
-		if auth != "Bearer "+s.adminToken && auth != s.adminToken {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
-			c.Abort()
-			return
-		}
-		c.Next()
-	}
 }
 
 func (s *Server) handleIndex(c *gin.Context) {
@@ -90,12 +78,7 @@ func (s *Server) handleRegisterSite(c *gin.Context) {
 		GitURL string `json:"git_url"`
 		PathID string `json:"pathid"`
 		Ref    string `json:"ref"`
-		Auth   *struct {
-			Type     string `json:"type"`
-			Token    string `json:"token"`
-			Username string `json:"username"`
-			Password string `json:"password"`
-		} `json:"auth"`
+		// 注：注册不再带凭据。私有仓库凭据在访问时运行时输入，存浏览器 sessionStorage。
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -117,28 +100,17 @@ func (s *Server) handleRegisterSite(c *gin.Context) {
 	gitURL := req.GitURL
 	ref := req.Ref
 
-	// 对于 GitHub，标准化浏览器 URL
+	// 对 GitHub，标准化浏览器 URL（支持 /tree/{ref}/path 形式）
 	if providerType == "github" {
-		if normalizedURL, extractedRef, err := normalizeGitHubURL(req.GitURL); err == nil {
+		if normalizedURL, extractedRef, err := provider.NormalizeGitHubURL(req.GitURL); err == nil {
 			gitURL = normalizedURL
-			// 如果用户没有指定 ref，使用从 URL 提取的 ref
 			if ref == "" {
 				ref = extractedRef
 			}
 		}
 	}
 
-	var auth *registry.Auth
-	if req.Auth != nil {
-		auth = &registry.Auth{
-			Type:     req.Auth.Type,
-			Token:    req.Auth.Token,
-			Username: req.Auth.Username,
-			Password: req.Auth.Password,
-		}
-	}
-
-	site, err := s.registry.Register(gitURL, req.PathID, ref, providerType, auth)
+	site, err := s.registry.Register(gitURL, req.PathID, ref, providerType, nil)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -148,32 +120,6 @@ func (s *Server) handleRegisterSite(c *gin.Context) {
 		"pathid": site.PathID,
 		"url":    fmt.Sprintf("%s/%s/", s.baseURL, site.PathID),
 	})
-}
-
-// normalizeGitHubURL 从浏览器 URL 中提取标准 Git URL 和 ref
-func normalizeGitHubURL(inputURL string) (gitURL, ref string, err error) {
-	u, err := url.Parse(inputURL)
-	if err != nil {
-		return "", "", err
-	}
-	
-	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
-	if len(parts) < 2 {
-		return "", "", errors.New("invalid github url")
-	}
-	
-	owner := parts[0]
-	repo := strings.TrimSuffix(parts[1], ".git")
-	gitURL = fmt.Sprintf("https://%s/%s/%s", u.Host, owner, repo)
-	
-	// 检查是否包含 /tree/{ref} 或 /blob/{ref}
-	if len(parts) >= 4 && (parts[2] == "tree" || parts[2] == "blob") {
-		ref = parts[3]
-	} else {
-		ref = "main"
-	}
-	
-	return gitURL, ref, nil
 }
 
 func (s *Server) handleListSites(c *gin.Context) {
@@ -220,23 +166,20 @@ func (s *Server) handleGetTree(c *gin.Context) {
 		return
 	}
 
-	var auth *provider.Auth
-	if site.Auth != nil {
-		auth = &provider.Auth{
-			Type:     site.Auth.Type,
-			Token:    site.Auth.Token,
-			Username: site.Auth.Username,
-			Password: site.Auth.Password,
-		}
-	}
+	// 凭据从请求头透传（运行时输入，存浏览器 sessionStorage），用完即弃。
+	auth := authFromHeader(c, site.Auth)
 
 	tree, err := s.provider.FetchTree(context.Background(), site.Provider, site.GitURL, site.Ref, auth)
 	if err != nil {
+		if errors.Is(err, provider.ErrAuthRequired) {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+			return
+		}
 		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to fetch tree: " + err.Error()})
 		return
 	}
 
-	filtered := provider.FilterRenderableFiles(tree)
+	filtered := provider.FilterRenderableFiles(tree, s.renderer.IsRenderable)
 	c.JSON(http.StatusOK, gin.H{"files": filtered})
 }
 
@@ -253,132 +196,178 @@ func (s *Server) handleSiteFile(c *gin.Context) {
 		return
 	}
 
-	// 如果没有指定文件，返回查看器页面
+	// 空 filepath：返回 viewer 页面骨架，下发严格 CSP。
 	if filepath == "" {
+		c.Header("Content-Security-Policy", viewerCSP)
 		c.HTML(http.StatusOK, "viewer.html", gin.H{
-			"PathID": pathID,
-			"GitURL": site.GitURL,
-			"Ref":    site.Ref,
+			"PathID":   pathID,
+			"GitURL":   site.GitURL,
+			"Ref":      site.Ref,
+			"RepoName": repoNameFromURL(site.GitURL),
 		})
 		return
 	}
 
-	page := 1
-	if pageStr := c.Query("page"); pageStr != "" {
-		if p, err := strconv.Atoi(pageStr); err == nil && p > 0 {
-			page = p
-		}
-	}
+	// 凭据从请求头透传（运行时输入），不与缓存关联、用完即弃。
+	auth := authFromHeader(c, site.Auth)
 
-	cacheKey := fmt.Sprintf("%s:%s:%d", pathID, filepath, page)
+	// 缓存键不含凭据（凭据可能因用户而异）。缓存的是文件字节/片段，
+	// 公开仓库内容对所有用户一致；私有仓库的内容也按 pathid:filepath 共享缓存——
+	// 若需更严格隔离，可把缓存限定为公开仓库（此处按 YAGNI 暂不区分）。
+	cacheKey := fmt.Sprintf("%s:%s", pathID, filepath)
 	if cached, ok := s.cache.Get(cacheKey); ok {
-		c.Data(http.StatusOK, "text/html; charset=utf-8", cached)
+		s.serveContent(c, filepath, cached)
 		return
-	}
-
-	var auth *provider.Auth
-	if site.Auth != nil {
-		auth = &provider.Auth{
-			Type:     site.Auth.Type,
-			Token:    site.Auth.Token,
-			Username: site.Auth.Username,
-			Password: site.Auth.Password,
-		}
 	}
 
 	content, err := s.provider.Fetch(context.Background(), site.Provider, site.GitURL, site.Ref, filepath, auth)
 	if err != nil {
-		if err == provider.ErrNotFound {
-			c.HTML(http.StatusNotFound, "error.html", gin.H{
-				"Code":    404,
-				"Message": "File not found",
-			})
-		} else {
-			c.HTML(http.StatusBadGateway, "error.html", gin.H{
-				"Code":    502,
-				"Message": "Failed to fetch file: " + err.Error(),
-			})
-		}
+		s.serveFetchError(c, err)
 		return
 	}
 
-	if int64(len(content)) > s.maxFileSize {
+	// 二进制/图片/HTML：直接缓存原始字节并透传；md/txt：缓存渲染片段。
+	kind := s.renderer.Kind(filepath)
+	switch kind {
+	case render.KindMarkdown, render.KindText:
+		rendered, err := s.renderer.Render(filepath, content)
+		if err != nil {
+			c.HTML(http.StatusInternalServerError, "error.html", gin.H{
+				"Code":    500,
+				"Message": "Render failed: " + err.Error(),
+			})
+			return
+		}
+		s.cache.Set(cacheKey, []byte(rendered))
+		c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(rendered))
+	default:
+		// KindHTML / KindImage / KindBinary / KindUnsupported：透传原始字节
+		s.cache.Set(cacheKey, content)
+		s.serveContent(c, filepath, content)
+	}
+}
+
+// serveContent 按文件类型设置 Content-Type 并返回原始字节。
+func (s *Server) serveContent(c *gin.Context, filepath string, content []byte) {
+	switch s.renderer.Kind(filepath) {
+	case render.KindHTML:
+		c.Data(http.StatusOK, "text/html; charset=utf-8", content)
+	case render.KindImage:
+		c.Data(http.StatusOK, contentTypeForImage(filepath), content)
+	case render.KindText, render.KindMarkdown:
+		// 走到这里说明是缓存命中的片段
+		c.Data(http.StatusOK, "text/html; charset=utf-8", content)
+	default:
+		c.Data(http.StatusOK, "application/octet-stream", content)
+	}
+}
+
+func (s *Server) serveFetchError(c *gin.Context, err error) {
+	if errors.Is(err, provider.ErrNotFound) {
+		c.HTML(http.StatusNotFound, "error.html", gin.H{
+			"Code":    404,
+			"Message": "File not found",
+		})
+		return
+	}
+	if errors.Is(err, provider.ErrAuthRequired) {
+		// 401 让前端探测到并弹出凭据输入框
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		return
+	}
+	if errors.Is(err, provider.ErrTooLarge) {
 		c.HTML(http.StatusRequestEntityTooLarge, "error.html", gin.H{
 			"Code":    413,
 			"Message": "File too large",
 		})
 		return
 	}
-
-	if !s.renderer.ShouldRender(filepath) {
-		c.Data(http.StatusOK, "application/octet-stream", content)
-		return
-	}
-
-	// HTML 文件直接返回原始内容（用于 iframe）
-	lastDot := strings.LastIndex(filepath, ".")
-	ext := ""
-	if lastDot >= 0 {
-		ext = strings.ToLower(filepath[lastDot:])
-	}
-	if ext == ".html" || ext == ".htm" {
-		s.cache.Set(cacheKey, content)
-		c.Data(http.StatusOK, "text/html; charset=utf-8", content)
-		return
-	}
-
-	rendered, totalPages, err := s.renderer.Render(filepath, content, page)
-	if err != nil {
-		c.HTML(http.StatusInternalServerError, "error.html", gin.H{
-			"Code":    500,
-			"Message": "Render failed: " + err.Error(),
-		})
-		return
-	}
-
-	html := s.wrapContent(rendered, filepath, page, totalPages, pathID)
-	s.cache.Set(cacheKey, []byte(html))
-
-	c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(html))
+	c.HTML(http.StatusBadGateway, "error.html", gin.H{
+		"Code":    502,
+		"Message": "Failed to fetch file: " + err.Error(),
+	})
 }
 
-func (s *Server) wrapContent(content, filepath string, page, totalPages int, pathID string) string {
-	pagination := ""
-	if totalPages > 1 {
-		pagination = fmt.Sprintf(`<div class="pagination">`)
-		if page > 1 {
-			pagination += fmt.Sprintf(`<a href="?page=%d">Previous</a>`, page-1)
+// authFromHeader 从请求的 Authorization 头解析凭据，用于私有仓库运行时鉴权。
+// 支持的形式：
+//   - "Bearer <token>" / "token <token>"：token 鉴权
+//   - "PRIVATE-TOKEN: <token>"（GitLab 风格，单独头）
+//   - "Basic <base64(user:pass)>"：账号密码
+//
+// 若请求未带凭据但站点预置了凭据（配置文件 sites.auth），回退到预置凭据。
+// 凭据只用于本次请求，不暂存、不落盘、不进日志。
+func authFromHeader(c *gin.Context, fallback *registry.Auth) *provider.Auth {
+	a := &provider.Auth{}
+
+	if h := c.GetHeader("Authorization"); h != "" {
+		switch {
+		case strings.HasPrefix(h, "Bearer "):
+			a.Type = "token"
+			a.Token = strings.TrimPrefix(h, "Bearer ")
+		case strings.HasPrefix(h, "token "):
+			a.Type = "token"
+			a.Token = strings.TrimPrefix(h, "token ")
+		case strings.HasPrefix(h, "Basic "):
+			if raw, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(h, "Basic ")); err == nil {
+				if parts := strings.SplitN(string(raw), ":", 2); len(parts) == 2 {
+					a.Type = "basic"
+					a.Username = parts[0]
+					a.Password = parts[1]
+				}
+			}
 		}
-		pagination += fmt.Sprintf(` Page %d / %d `, page, totalPages)
-		if page < totalPages {
-			pagination += fmt.Sprintf(`<a href="?page=%d">Next</a>`, page+1)
+	}
+	if a.Type == "" {
+		if pt := c.GetHeader("PRIVATE-TOKEN"); pt != "" {
+			a.Type = "token"
+			a.Token = pt
 		}
-		pagination += `</div>`
 	}
 
-	return fmt.Sprintf(`<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>%s</title>
-    <link rel="stylesheet" href="/static/css/style.css">
-</head>
-<body>
-    <div class="container">
-        <header>
-            <h1>%s</h1>
-            <div class="controls">
-                <button id="theme-toggle">Toggle Theme</button>
-                <button id="lang-toggle">EN/中文</button>
-            </div>
-        </header>
-        <main>
-            %s
-        </main>
-        %s
-    </div>
-    <script src="/static/js/app.js"></script>
-</body>
-</html>`, filepath, filepath, content, pagination)
+	if a.Type == "" && fallback != nil {
+		return &provider.Auth{
+			Type:     fallback.Type,
+			Token:    fallback.Token,
+			Username: fallback.Username,
+			Password: fallback.Password,
+		}
+	}
+	if a.Type == "" {
+		return nil
+	}
+	return a
+}
+
+// repoNameFromURL 从 git URL 解析出 owner/repo 作为显示名。
+func repoNameFromURL(gitURL string) string {
+	parts := strings.Split(strings.Trim(gitURL, "/"), "/")
+	if len(parts) < 2 {
+		return gitURL
+	}
+	// 形如 https://github.com/owner/repo -> ["https:", "", "github.com", "owner", "repo"]
+	// 取最后两段
+	owner := parts[len(parts)-2]
+	repo := strings.TrimSuffix(parts[len(parts)-1], ".git")
+	return owner + "/" + repo
+}
+
+func contentTypeForImage(filepath string) string {
+	switch strings.ToLower(filepath[strings.LastIndex(filepath, "."):]) {
+	case ".png":
+		return "image/png"
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".gif":
+		return "image/gif"
+	case ".bmp":
+		return "image/bmp"
+	case ".webp":
+		return "image/webp"
+	case ".svg":
+		return "image/svg+xml"
+	case ".ico":
+		return "image/x-icon"
+	default:
+		return "application/octet-stream"
+	}
 }
