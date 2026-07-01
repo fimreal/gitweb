@@ -36,15 +36,8 @@
                         <div class="compact-grid">
                             <input type="text" id="pathid" name="pathid" placeholder="Path ID (auto)" class="compact-input">
                             <input type="text" id="ref" name="ref" placeholder="Branch" value="main" class="compact-input">
-                            <select id="auth_type" name="auth_type" class="compact-input">
-                                <option value="">No auth</option>
-                                <option value="token">Token</option>
-                                <option value="basic">User/Pass</option>
-                            </select>
-                            <input type="password" id="token" name="token" placeholder="Token" class="compact-input" style="display:none;">
-                            <input type="text" id="username" name="username" placeholder="Username" class="compact-input" style="display:none;">
-                            <input type="password" id="password" name="password" placeholder="Password" class="compact-input" style="display:none;">
                         </div>
+                        <p class="auth-hint" data-en="Private repo? Open it and enter credentials when prompted." data-zh="私有仓库？打开后按提示输入凭据。">Private repo? Open it and enter credentials when prompted.</p>
                     </details>
                 </form>
                 

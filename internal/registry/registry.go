@@ -1,8 +1,6 @@
 package registry
 
 import (
-	"fmt"
-	"net/url"
 	"crypto/rand"
 	"encoding/base32"
 	"errors"
@@ -44,6 +42,11 @@ func New() *Registry {
 	}
 }
 
+// reservedPrefixes 是不可用作 pathid 的前缀，避免与路由保留路径冲突。
+var reservedPrefixes = map[string]bool{
+	"api": true, "static": true, "healthz": true,
+}
+
 func (r *Registry) Register(gitURL, pathID, ref string, providerType string, auth *Auth) (*Site, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -54,10 +57,14 @@ func (r *Registry) Register(gitURL, pathID, ref string, providerType string, aut
 
 	if pathID == "" {
 		pathID = generatePathID()
+	} else if !IsValidPathID(pathID) {
+		return nil, errors.New("invalid pathid: must be 1-32 chars of [a-zA-Z0-9_-]")
+	} else if reservedPrefixes[pathID] {
+		return nil, errors.New("pathid is reserved")
 	}
 
 	if _, exists := r.sites[pathID]; exists {
-		return nil, errors.New("pathid already exists")
+		return nil, ErrDuplicatePathID
 	}
 
 	site := &Site{
@@ -119,7 +126,9 @@ func generatePathID() string {
 	return encoded
 }
 
-func isValidPathID(pathID string) bool {
+// IsValidPathID 校验自定义 pathid：字符集 [a-zA-Z0-9_-]、长度 1~32。
+// 保留路径前缀（/api、/static、/healthz 等）由调用方在注册前检查，避免与保留前缀冲突。
+func IsValidPathID(pathID string) bool {
 	if len(pathID) == 0 || len(pathID) > 32 {
 		return false
 	}
@@ -130,44 +139,4 @@ func isValidPathID(pathID string) bool {
 		}
 	}
 	return true
-}
-
-func detectProvider(gitURL string) string {
-	lower := strings.ToLower(gitURL)
-	if strings.Contains(lower, "github.com") {
-		return "github"
-	}
-	if strings.Contains(lower, "gitlab.com") || strings.Contains(lower, "gitlab") {
-		return "gitlab"
-	}
-	if strings.Contains(lower, "gitea") {
-		return "gitea"
-	}
-	return "generic"
-}
-
-// normalizeGitHubURL 从浏览器 URL 中提取标准 Git URL 和 ref
-func normalizeGitHubURL(inputURL string) (gitURL, ref string, err error) {
-	u, err := url.Parse(inputURL)
-	if err != nil {
-		return "", "", err
-	}
-	
-	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
-	if len(parts) < 2 {
-		return "", "", errors.New("invalid github url")
-	}
-	
-	owner := parts[0]
-	repo := strings.TrimSuffix(parts[1], ".git")
-	gitURL = fmt.Sprintf("https://%s/%s/%s", u.Host, owner, repo)
-	
-	// 检查是否包含 /tree/{ref} 或 /blob/{ref}
-	if len(parts) >= 4 && (parts[2] == "tree" || parts[2] == "blob") {
-		ref = parts[3]
-	} else {
-		ref = "main"
-	}
-	
-	return gitURL, ref, nil
 }

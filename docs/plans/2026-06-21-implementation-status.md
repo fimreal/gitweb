@@ -1,194 +1,87 @@
 # gitweb 实现状态文档
 
-更新时间：2026-06-21
+更新时间：2026-07-01（公开服务重构后）
 
-## 与设计文档的主要差异
+## 本期重构要点
 
-### 1. 文件树功能（已实现，设计文档说"不做"）
+本次重构按 `docs/plans/2026-06-15-gitweb-design.md` 第 12 节「已确认的决策」收口，
+核心变化：
 
-**设计文档原文：**
-> 不做目录浏览：仅按确切 `filepath` 取单文件，不列举仓库目录。
+1. **服务改为完全公开，无注册鉴权**：删除 `admin_token` / `authMiddleware` 整层。
+   任何人都能注册与访问。滥用由 SSRF 拦截、文件大小限制、缓存容量与拉取超时兜底。
+2. **私有仓库凭据改为运行时输入**：访问页面时若远端返回 401/403，viewer 弹窗提示
+   输入 token / 账号密码。凭据只存浏览器 `sessionStorage`，每次请求经 `Authorization`
+   头带到后端、用完即弃，**不落盘、不进日志、不进 List API**。多用户访问同一 pathid
+   天然隔离（凭据只在各自浏览器）。
+3. **渲染管线统一为前端 SPA**：viewer.html 是唯一入口；服务端 `wrapContent` 删除，
+   `/:pathid/*filepath` 对 md/txt 返回渲染 HTML 片段，html/图片/二进制透传原始字节。
+4. **HTML 用 iframe sandbox 承载**：`<iframe sandbox="allow-same-origin">`（不加
+   `allow-scripts`），防不可信仓库的恶意脚本逃逸。
+5. **分页前端化**：服务端不再分页（删掉假分页），长纯文本由前端按行切分。
 
-**实际实现：**
-- 提供了 `/api/sites/:pathid/tree` API，返回仓库完整文件树
-- 实现了浮动文件树 UI：
-  - 右下角气泡按钮（📁 图标）
-  - 点击弹出可拖动浮动窗口
-  - 支持文件夹展开/收起
-  - 支持隐藏 `.` 开头文件的开关
-  - 文件树支持缩进显示层级
-  - 可缩小为气泡，不遮挡页面内容
+## 已实现
 
-**技术实现：**
-- 使用 GitHub/GitLab/Gitea API 的 tree 端点获取完整文件列表
-- 前端构建树形结构并渲染
-- 支持点击文件直接跳转查看
+### 基础架构
+- Gin HTTP 服务器；`/:pathid/*filepath` 路由（空路径返回 viewer，有路径返回文件）
+- 内存 Registry（pathid → Site），自定义 pathid 校验 + 保留前缀检查（api/static/healthz）
+- Provider 抽象（GitHub/GitLab/Gitea），URL scheme 跟随输入（支持自建 http Gitea）
+- 内存缓存：**hashicorp/golang-lru/v2 真 LRU + TTL**，命中刷新，过期惰性删除
+- Markdown/HTML/text 渲染（goldmark），扩展名表全项目唯一（render.IsRenderable）
 
-### 2. 页面渲染方式
+### 安全（公开部署硬需求）
+- **SSRF**：`internal/provider/ssrf.go`，默认拒绝私网/环回/链路本地，复用 `allow_hosts`/`deny_hosts`（支持通配）
+- **文件大小**：`io.LimitReader` 在读时限制（非读后检查），超出返回 `ErrTooLarge`
+- **CSP**：viewer 页面与文件响应下发严格 `Content-Security-Policy`
+- **HTML 沙箱**：`<iframe sandbox="allow-same-origin">`，无 `allow-scripts`
+- **凭据安全**：仅 sessionStorage，不落盘/不进日志/List
 
-**设计文档隐含：** 服务端渲染 HTML 返回
+### 路由与访问
+- `/:pathid/*filepath`：空路径 → viewer 骨架（注入 RepoName/PathID/GitURL/Ref）；有路径 → 渲染片段或原始字节
+- pathid 自定义（校验 `[a-zA-Z0-9_-]`、1~32 字符、非保留前缀）或随机 8 位
+- 首屏自动加载 README.md（回退 index.html / README.txt / README）
+- GitHub 浏览器 URL 标准化（支持 `/tree/{ref}/path`），`provider.NormalizeGitHubURL` 全项目唯一
 
-**实际实现：**
-- HTML 文件：服务端获取后原样返回，浏览器直接渲染
-- Markdown/TXT：服务端转换为 HTML，嵌入统一的 viewer 模板
-- Viewer 页面：Go template 渲染骨架，JavaScript 动态加载文件树和内容
-- 文件内容获取：前端通过 API 请求文件树，通过路由获取文件内容
+### 前端 UI
+- viewer：浮动可拖拽文件树窗口 + 气泡按钮；暗黑模式（CSS 变量）；凭据输入弹窗
+- 首页：注册表单（无凭据字段，凭据运行时输入）；中英双语；暗黑模式
+- 长纯文本前端分页
 
-### 3. 暗黑模式实现细节
-
-**实际实现：**
-- 自动检测系统暗黑模式偏好（`prefers-color-scheme`）
-- 用户首次访问时自动应用系统设置
-- 手动切换后保存到 localStorage
-- 监听系统暗黑模式变化，仅在用户未手动设置时自动切换
-- viewer 页面和首页都支持暗黑模式
-
-### 4. 文件类型支持
-
-**实际支持的渲染类型：**
-```go
-".html", ".htm",           // 原样输出
-".md", ".markdown",        // Markdown → HTML
-".txt",                    // 纯文本 → HTML（保留换行）
-".sh", ".bash", ".py",     // 脚本文件 → HTML（作为文本）
-".js", ".css", ".json",    // 代码文件 → HTML（作为文本）
-".xml", ".yaml", ".yml",   // 配置文件 → HTML（作为文本）
+### API
 ```
-
-**二进制文件处理：**
-- 检测文件开头字节判断是否为文本
-- 大文件或二进制文件提示是否强制打开（设计中，待完善）
-
-### 5. 分页功能
-
-**实际实现：**
-- 长文件自动分页（默认每页 1000 行）
-- 页面底部显示翻页控件
-- 通过 URL 参数 `?page=N` 控制页码
-
-## 已实现的核心功能
-
-### 基础架构 ✅
-- Gin HTTP 服务器
-- 内存 Registry（pathid → Site 映射）
-- Provider 抽象层（GitHub/GitLab/Gitea）
-- 内存缓存（文件内容）
-- Markdown/TXT 渲染器
-
-### 路由与访问 ✅
-- `/:pathid/*filepath` 路由
-- pathid 自定义或随机 8 位
-- 默认 index.html
-- 文件路径保留（如 `docs/test.md`）
-
-### Git 仓库支持 ✅
-- 公开仓库
-- 私有仓库（token / 用户名密码）
-- GitHub URL 规范化（处理 `/tree/branch/path` 格式）
-- HTTP 代理支持（`--http-proxy` 参数）
-- 多平台支持（GitHub/GitLab/Gitea）
-
-### 前端 UI ✅
-- 极简首页（DeepSeek 风格参考）
-- 响应式布局
-- 中英文双语切换（localStorage 持久化）
-- 暗黑模式自动检测 + 手动切换
-- 浮动文件树窗口（可拖动、缩小为气泡）
-
-### API 接口 ✅
-```
-POST   /api/sites                    创建站点
+POST   /api/sites                    创建站点（无鉴权）
 GET    /api/sites                    列出所有站点
 DELETE /api/sites/:pathid            删除站点
 POST   /api/sites/:pathid/refresh    刷新缓存
-GET    /api/sites/:pathid/tree       获取文件树
-GET    /:pathid/*filepath            访问文件
+GET    /api/sites/:pathid/tree       获取文件树（可带 Authorization 访问私有仓库）
+GET    /:pathid/*filepath            viewer 页面 / 文件内容
 ```
 
-## 未实现的设计功能
+### 测试
+- `internal/registry`：注册/冲突/随机 pathid/校验/保留前缀/删除
+- `internal/provider`：URL 解析、SSRF 拒绝（私网/环回）、allow/deny 通配、401/403→ErrAuthRequired、404→ErrNotFound、大文件→ErrTooLarge、Gitea token 鉴权头、tree、FilterRenderableFiles
+- `internal/cache`：TTL 过期、LRU 驱逐、Invalidate 前缀
+- `internal/render`：Kind 分派、IsRenderable、md/html/纯文本转义
 
-### 安全特性 ❌
-- [ ] admin_token API 认证
-- [ ] SSRF 防护（内网地址黑名单）
-- [ ] Content-Security-Policy 响应头
-- [ ] HTML 沙箱模式（iframe sandbox）
-- [ ] 文件大小限制
-- [ ] 并发请求限制
+## 已知限制 / 待改进
 
-### 配置管理 ❌
-- [ ] YAML 配置文件加载
-- [ ] 环境变量插值（`${VAR}`）
-- [ ] 命令行参数预置站点
-
-### 错误处理 ⚠️
-- [ ] 中英文友好错误页面
-- [ ] 区分 404/502 错误
-- [ ] 超时回退旧缓存
-- [ ] 渲染失败降级纯文本
-
-### 缓存优化 ⚠️
-- [x] 基础内存缓存
-- [ ] TTL 过期机制
-- [ ] LRU 驱逐策略
-- [ ] singleflight 防并发拉取
-
-## 当前已知问题
-
-1. **浮动窗口点击**：需要验证右下角气泡按钮点击是否正常工作
-2. **文件树完整性**：需要验证是否列出所有文本文件（包括无后缀文件）
-3. **HTML 文件渲染**：部分 HTML 文件加载显示 "Loading..." 问题（待定位）
+- **GenericProvider**：未识别 host 仍返回 "not yet implemented"（设计提到的通用 raw 模板回退未做）。
+- **缓存与私有仓库**：缓存按 `pathid:filepath` 共享，未按凭据隔离（YAGNI；公开仓库内容一致，私有仓库内容也按 pathid 共享——若需严格隔离可后续把缓存限定为公开仓库）。
+- **GitHub 默认分支**：ref 默认 `main`，若仓库默认分支非 main 且未指定 ref，会 404；前端提示在文件树上方指定分支（未实现分支输入 UI）。
+- **gitweb.log / 旧二进制**：仓库根有历史 `gitweb` 二进制与日志文件，不影响运行。
+- **网络环境**：`raw.githubusercontent.com` 在部分网络环境下不可达（非代码问题）；tree 接口走 `api.github.com` 通常可达。
 
 ## 技术栈
 
 ```
-后端：
-- Go 1.21+
-- github.com/gin-gonic/gin
-- github.com/yuin/goldmark (Markdown)
-- net/http (标准库，拉取远端文件)
-
-前端：
-- 原生 JavaScript（无框架）
-- CSS 变量实现主题切换
-- 响应式布局（媒体查询）
+后端：Go 1.21+ / gin / goldmark / hashicorp/golang-lru/v2 / golang.org/x/sync/singleflight
+前端：原生 JS（无框架）/ CSS 变量
 ```
 
-## 启动方式
+## 启动
 
 ```bash
-# 基础启动
-./gitweb
-
-# 带代理
+go build -o gitweb ./cmd/gitweb
+./gitweb                      # 默认 :8080
+./gitweb --config config.yaml
 ./gitweb --http-proxy http://192.168.10.1:54122
-
-# 指定端口和 base URL
-./gitweb --port 8080 --base-url http://localhost:8080
 ```
-
-## 使用流程
-
-1. 访问首页 `http://localhost:8080/`
-2. 输入 Git 仓库 URL（如 `https://github.com/user/repo`）
-3. （可选）在高级选项中自定义 Path ID、分支、认证信息
-4. 点击"创建"生成站点
-5. 访问 `http://localhost:8080/<pathid>/` 查看内容
-6. 点击右下角 📁 气泡打开文件树浏览其他文件
-
-## 后续建议
-
-### 高优先级
-1. 修复浮动窗口点击问题（如果存在）
-2. 添加 admin_token 保护 API
-3. 实现文件大小限制
-4. 改进错误页面
-
-### 中优先级
-5. 配置文件支持
-6. SSRF 防护
-7. 完善缓存机制（TTL + LRU）
-
-### 低优先级
-8. CSP 安全头
-9. HTML 沙箱模式
-10. 日志增强
