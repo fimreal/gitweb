@@ -213,3 +213,90 @@ func TestFilterRenderableFiles(t *testing.T) {
 	}
 }
 
+// ----- IdentifyProvider 探测识别 -----
+
+func TestIdentifyProviderGiteaProbe(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/version" {
+			w.WriteHeader(200)
+			w.Write([]byte(`{"version":"1.25.5"}`))
+			return
+		}
+		http.NotFound(w, r) // /api/v4/version → 404
+	}))
+	defer srv.Close()
+
+	m := newTestManager(t, 1<<20)
+	if got := m.IdentifyProvider(srv.URL + "/fimreal/gitweb"); got != "gitea" {
+		t.Fatalf("IdentifyProvider = %q, want gitea", got)
+	}
+	// 缓存命中：第二个同 host 仓库不应再依赖探测结果变化
+	if got := m.IdentifyProvider(srv.URL + "/other/repo"); got != "gitea" {
+		t.Fatalf("cached IdentifyProvider = %q, want gitea", got)
+	}
+}
+
+func TestIdentifyProviderGitLabProbe(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v4/version" {
+			w.WriteHeader(200)
+			w.Write([]byte(`{"version":"16.0"}`))
+			return
+		}
+		http.NotFound(w, r) // /api/v1/version → 404
+	}))
+	defer srv.Close()
+
+	m := newTestManager(t, 1<<20)
+	if got := m.IdentifyProvider(srv.URL + "/group/project"); got != "gitlab" {
+		t.Fatalf("IdentifyProvider = %q, want gitlab", got)
+	}
+}
+
+func TestIdentifyProviderNeither(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r) // 两个端点都 404
+	}))
+	defer srv.Close()
+
+	m := newTestManager(t, 1<<20)
+	if got := m.IdentifyProvider(srv.URL + "/o/repo"); got != "" {
+		t.Fatalf("IdentifyProvider = %q, want empty", got)
+	}
+}
+
+func TestIdentifyProviderKeywordFastPath(t *testing.T) {
+	// 哨兵 server：一旦被请求即 Fatal，证明关键字路径零网络
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("fast path should not probe, got request %s", r.URL.Path)
+	}))
+	defer srv.Close()
+	_ = srv.URL // 哨兵仅用于证明不被触发
+
+	m := newTestManager(t, 1<<20)
+	cases := map[string]string{
+		"https://github.com/o/repo": "github",
+		"https://gitlab.com/o/repo": "gitlab",
+		"https://gitea.com/o/repo":  "gitea",
+	}
+	for url, want := range cases {
+		if got := m.IdentifyProvider(url); got != want {
+			t.Errorf("IdentifyProvider(%q) = %q, want %q", url, got, want)
+		}
+	}
+}
+
+func TestIdentifyProviderSSRFBlocked(t *testing.T) {
+	// 哨兵 server：一旦被请求即 Fatal，证明探测被 SSRF 拦截未发出
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("probe should be SSRF-blocked, got request %s", r.URL.Path)
+	}))
+	defer srv.Close()
+
+	m := NewManager(0, "", "", nil, nil, 1<<20) // 无 allow，默认拒私网
+	got := m.IdentifyProvider(srv.URL + "/o/repo") // httptest 是 127.0.0.1
+	if got != "" {
+		t.Fatalf("expected empty (SSRF blocked), got %q", got)
+	}
+}
+

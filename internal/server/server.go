@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -15,11 +16,23 @@ import (
 	"github.com/limingrui/gitweb/internal/render"
 )
 
-// viewerCSP 是 viewer 页面与文件内容响应下发的严格 CSP：
-// 限制脚本来源为同源，防止用户仓库 HTML 的脚本逃逸；图片允许任意源与 data/blob；
-// frame-src 允许同源 iframe（承载用户 HTML）。
-const viewerCSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; " +
-	"img-src 'self' data: blob: *; connect-src 'self'; frame-src 'self'"
+// viewerCSP 是 viewer 页面下发的严格 CSP：
+// 限制脚本来源为同源 + 本页一次性 nonce（用于内联启动脚本），防止用户仓库 HTML
+// 的脚本逃逸；图片允许任意源与 data/blob；frame-src 允许同源 iframe（承载用户 HTML）。
+// nonce 每次请求随机生成，仅本页内联脚本可用。
+func viewerCSP(nonce string) string {
+	return "default-src 'self'; script-src 'self' 'nonce-" + nonce + "'; style-src 'self' 'unsafe-inline'; " +
+		"img-src 'self' data: blob: *; connect-src 'self'; frame-src 'self'"
+}
+
+// newNonce 生成 16 字节随机 base64url nonce，用于 CSP 内联脚本放行。
+func newNonce() (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
+}
 
 type Server struct {
 	registry    *registry.Registry
@@ -118,7 +131,7 @@ func (s *Server) handleRegisterSite(c *gin.Context) {
 
 	c.JSON(http.StatusCreated, gin.H{
 		"pathid": site.PathID,
-		"url":    fmt.Sprintf("%s/%s/", s.baseURL, site.PathID),
+		"url":    fmt.Sprintf("%s/%s/", s.requestBaseURL(c), site.PathID),
 	})
 }
 
@@ -132,6 +145,7 @@ func (s *Server) handleListSites(c *gin.Context) {
 			"ref":        site.Ref,
 			"provider":   site.Provider,
 			"created_at": site.CreatedAt,
+			"views":      site.Views,
 		}
 	}
 	c.JSON(http.StatusOK, gin.H{"sites": result})
@@ -196,14 +210,26 @@ func (s *Server) handleSiteFile(c *gin.Context) {
 		return
 	}
 
-	// 空 filepath：返回 viewer 页面骨架，下发严格 CSP。
+	// 空 filepath：返回 viewer 页面骨架，下发严格 CSP（带本页 nonce）。
 	if filepath == "" {
-		c.Header("Content-Security-Policy", viewerCSP)
+		nonce, err := newNonce()
+		if err != nil {
+			c.HTML(http.StatusInternalServerError, "error.html", gin.H{
+				"Code":    500,
+				"Message": "failed to generate nonce",
+			})
+			return
+		}
+		// 浏览数 +1（内存累计，防抖落盘）
+		s.registry.IncrementViews(pathID)
+		c.Header("Content-Security-Policy", viewerCSP(nonce))
 		c.HTML(http.StatusOK, "viewer.html", gin.H{
 			"PathID":   pathID,
 			"GitURL":   site.GitURL,
 			"Ref":      site.Ref,
 			"RepoName": repoNameFromURL(site.GitURL),
+			"Views":    site.Views + 1, // +1 包含本次访问
+			"Nonce":    nonce,
 		})
 		return
 	}
@@ -336,6 +362,30 @@ func authFromHeader(c *gin.Context, fallback *registry.Auth) *provider.Auth {
 		return nil
 	}
 	return a
+}
+
+// requestBaseURL 基于当前请求推导「访问本服务的根 URL」。
+// 优先采用反代头（X-Forwarded-Proto / X-Forwarded-Host），否则回退到请求本身的
+// scheme + Host 头。这样从 192.168.x.x、localhost 或公网域名访问时，返回的链接
+// host 都与用户实际访问的一致，而非配置里固定的 baseURL。
+// s.baseURL 仅在请求头缺失的极端情况下兜底。
+func (s *Server) requestBaseURL(c *gin.Context) string {
+	scheme := c.GetHeader("X-Forwarded-Proto")
+	if scheme == "" {
+		if c.Request.TLS != nil {
+			scheme = "https"
+		} else {
+			scheme = "http"
+		}
+	}
+	host := c.GetHeader("X-Forwarded-Host")
+	if host == "" {
+		host = c.Request.Host
+	}
+	if host == "" {
+		return strings.TrimRight(s.baseURL, "/")
+	}
+	return scheme + "://" + host
 }
 
 // repoNameFromURL 从 git URL 解析出 owner/repo 作为显示名。
