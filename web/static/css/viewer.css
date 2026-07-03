@@ -119,11 +119,12 @@ body {
     -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(160%);
     backdrop-filter: blur(var(--glass-blur)) saturate(160%);
     flex-shrink: 0;
-    transform: translateY(0);
     transition: transform 0.34s var(--ease-apple), box-shadow 0.28s var(--ease-apple);
-    will-change: transform;
 }
-.viewer-header.head-hidden { transform: translateY(-100%); }
+/* 隐藏态：translateY(-100%) 滑出视口；并禁用命中——iOS Safari 合成层在
+   transform 滑出后命中区域可能不刷新，会误挡下方内容/按钮；隐藏时本就不可见，
+   pointer-events:none 既无副作用又规避这个 hit-test bug。 */
+.viewer-header.head-hidden { transform: translateY(-100%); pointer-events: none; }
 /* 滚动时加一道细分隔阴影，贴顶时去掉，过渡更自然 */
 .viewer-header.head-scrolled { box-shadow: 0 6px 16px rgba(15, 23, 42, 0.06); }
 [data-theme="dark"] .viewer-header.head-scrolled, :root:not([data-theme="light"]) .viewer-header.head-scrolled {
@@ -281,6 +282,19 @@ body {
 [data-theme="dark"] .delete-btn:hover, :root:not([data-theme="light"]) .delete-btn:hover {
     color: #f87171; border-color: #f87171; background: rgba(248, 113, 113, 0.08);
 }
+
+/* 凭据按钮：与 delete-btn 同形，hover 走 accent 色 */
+.auth-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--secondary);
+    padding: 6px 12px;
+    border-radius: var(--r-sm);
+    cursor: pointer;
+    font-size: 13px;
+    transition: all 0.18s ease;
+}
+.auth-btn:hover { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
 
 .content-area {
     flex: 1;
@@ -481,6 +495,58 @@ body {
 }
 .floating-tree-window.minimized .min-dock svg { width: 20px; height: 20px; }
 .floating-tree-window.minimized:hover .min-dock { color: #fff; opacity: 0.95; }
+
+/* ---- 气泡提示：首次打开时引导点击浮岛展开文件目录 ----
+   定位由 JS 用 fixed + left/right/top 设置；带小箭头指向浮岛。 */
+.dock-bubble {
+    position: fixed;
+    z-index: 1002;
+    transform: translateY(-50%);
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px 8px 12px;
+    background: var(--bg);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    box-shadow: var(--shadow-md);
+    font-size: 12.5px;
+    white-space: nowrap;
+    animation: bubble-in 0.3s var(--ease-apple);
+}
+.dock-bubble span { line-height: 1; }
+.dock-bubble-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px; height: 18px;
+    border: none;
+    background: transparent;
+    color: var(--secondary);
+    border-radius: 50%;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+.dock-bubble-close svg { width: 11px; height: 11px; display: block; }
+.dock-bubble-close:hover { background: var(--hover-bg); color: var(--fg); }
+/* 小箭头：贴向浮岛一侧 */
+.dock-bubble::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    border: 6px solid transparent;
+}
+.dock-bubble.point-right::before { right: -12px; border-left-color: var(--bg); }
+.dock-bubble.point-left::before  { left: -12px; border-right-color: var(--bg); }
+@keyframes bubble-in {
+    from { opacity: 0; transform: translateY(-50%) scale(0.9); }
+    to   { opacity: 1; transform: translateY(-50%) scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+    .dock-bubble { animation: none; }
+}
 
 /* 内容区 */
 .floating-tree-content {

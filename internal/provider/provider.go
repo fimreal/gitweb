@@ -61,6 +61,14 @@ type Auth struct {
 	Password string
 }
 
+// hasAuth 报告 auth 是否携带了可用凭据（token 或账号密码）。
+// 用于区分 404 的两种语义：GitHub/GitLab/Gitea 对私有仓库在无凭据时统一返回 404
+// （不泄露仓库存在性）而非 401，因此无凭据的 404 应视为「需要鉴权」并触发前端凭据输入；
+// 携带凭据仍 404 则视为真实的 not-found（文件/分支不存在或凭据无权限）。
+func hasAuth(a *Auth) bool {
+	return a != nil && (a.Token != "" || a.Username != "")
+}
+
 type Provider interface {
 	Fetch(ctx context.Context, gitURL, ref, filepath string, auth *Auth) ([]byte, error)
 }
@@ -162,6 +170,10 @@ func (p *GitHubProvider) Fetch(ctx context.Context, gitURL, ref, filepath string
 		return nil, ErrAuthRequired
 	}
 	if resp.StatusCode == 404 {
+		if !hasAuth(auth) {
+			// 无凭据时 GitHub 对私有仓库返回 404（不泄露存在性），视为需要鉴权
+			return nil, ErrAuthRequired
+		}
 		return nil, ErrNotFound
 	}
 	if resp.StatusCode != 200 {
@@ -262,6 +274,9 @@ func (p *GitLabProvider) Fetch(ctx context.Context, gitURL, ref, filepath string
 		return nil, ErrAuthRequired
 	}
 	if resp.StatusCode == 404 {
+		if !hasAuth(auth) {
+			return nil, ErrAuthRequired
+		}
 		return nil, ErrNotFound
 	}
 	if resp.StatusCode != 200 {
@@ -327,6 +342,9 @@ func (p *GiteaProvider) Fetch(ctx context.Context, gitURL, ref, filepath string,
 		return nil, ErrAuthRequired
 	}
 	if resp.StatusCode == 404 {
+		if !hasAuth(auth) {
+			return nil, ErrAuthRequired
+		}
 		return nil, ErrNotFound
 	}
 	if resp.StatusCode != 200 {

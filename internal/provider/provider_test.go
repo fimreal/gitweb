@@ -148,10 +148,28 @@ func TestFetchNotFound(t *testing.T) {
 	}))
 	defer srv.Close()
 
+	// 携带凭据时 404 视为真实的 not-found（文件/分支不存在或凭据无权限）
 	m := newTestManager(t, 1<<20)
-	_, err := m.Fetch(context.Background(), "gitea", srv.URL+"/o/repo", "main", "f.txt", nil)
+	auth := &Auth{Type: "token", Token: "secret"}
+	_, err := m.Fetch(context.Background(), "gitea", srv.URL+"/o/repo", "main", "f.txt", auth)
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+}
+
+// TestFetchNotFoundNoAuth：无凭据时 404 应视为需要鉴权。
+// GitHub/GitLab/Gitea 对私有仓库在无凭据时统一返回 404（不泄露存在性），
+// 把它映射为 ErrAuthRequired 才能触发前端凭据输入。
+func TestFetchNotFoundNoAuth(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+
+	m := newTestManager(t, 1<<20)
+	_, err := m.Fetch(context.Background(), "gitea", srv.URL+"/o/repo", "main", "f.txt", nil)
+	if !errors.Is(err, ErrAuthRequired) {
+		t.Errorf("expected ErrAuthRequired, got %v", err)
 	}
 }
 

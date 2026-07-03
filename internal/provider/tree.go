@@ -58,6 +58,10 @@ func fetchGitHubTree(ctx context.Context, client *http.Client, b providerBase, g
 	if resp.StatusCode == 401 || resp.StatusCode == 403 {
 		return nil, ErrAuthRequired
 	}
+	if resp.StatusCode == 404 && !hasAuth(auth) {
+		// 私有仓库无凭据时 GitHub 统一返回 404，视为需要鉴权以触发前端凭据输入
+		return nil, ErrAuthRequired
+	}
 	if resp.StatusCode != 200 {
 		body, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("github api returned %d: %s", resp.StatusCode, string(body))
@@ -120,6 +124,9 @@ func fetchGitLabTree(ctx context.Context, client *http.Client, b providerBase, g
 	if resp.StatusCode == 401 || resp.StatusCode == 403 {
 		return nil, ErrAuthRequired
 	}
+	if resp.StatusCode == 404 && !hasAuth(auth) {
+		return nil, ErrAuthRequired
+	}
 	if resp.StatusCode != 200 {
 		body, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("gitlab api returned %d: %s", resp.StatusCode, string(body))
@@ -178,6 +185,9 @@ func fetchGiteaTree(ctx context.Context, client *http.Client, b providerBase, gi
 	defer resp.Body.Close()
 
 	if resp.StatusCode == 401 || resp.StatusCode == 403 {
+		return nil, ErrAuthRequired
+	}
+	if resp.StatusCode == 404 && !hasAuth(auth) {
 		return nil, ErrAuthRequired
 	}
 	if resp.StatusCode != 200 {
@@ -294,6 +304,9 @@ func listGitLabBranches(ctx context.Context, client *http.Client, b providerBase
 	if resp.StatusCode == 401 || resp.StatusCode == 403 {
 		return nil, ErrAuthRequired
 	}
+	if resp.StatusCode == 404 && !hasAuth(auth) {
+		return nil, ErrAuthRequired
+	}
 	if resp.StatusCode != 200 {
 		body, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("gitlab api returned %d: %s", resp.StatusCode, string(body))
@@ -335,6 +348,9 @@ func listGiteaBranches(ctx context.Context, client *http.Client, b providerBase,
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == 401 || resp.StatusCode == 403 {
+		return nil, ErrAuthRequired
+	}
+	if resp.StatusCode == 404 && !hasAuth(auth) {
 		return nil, ErrAuthRequired
 	}
 	if resp.StatusCode != 200 {

@@ -37,6 +37,15 @@
         </div>
     </div>
 
+    <!-- 气泡提示：首次打开时引导点击浮岛展开文件目录。
+         放在 .floating-tree-window 外层（该窗口 overflow:hidden + transform 会裁剪 fixed 子元素） -->
+    <div class="dock-bubble" id="dock-bubble" style="display:none;">
+        <span>点击查看文件目录</span>
+        <button class="dock-bubble-close" id="dock-bubble-close" title="知道了" aria-label="知道了">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+    </div>
+
     <!-- 主内容区 -->
     <main class="main-content">
         <div class="viewer-header">
@@ -57,6 +66,7 @@
             </div>
             <div class="content-header-actions">
                 <a href="/" class="home-link">← 首页</a>
+                <button class="auth-btn" id="auth-site-btn" title="输入/更换仓库凭据">🔑 凭据</button>
                 <button class="delete-btn" id="delete-site-btn" title="删除此站点">🗑 删除</button>
             </div>
         </div>
@@ -109,6 +119,7 @@
     let currentPath = '';
     let currentRef = '{{ .Ref }}'; // 临时分支：切换分支时改写，不持久化
     let authResolve = null; // 凭据弹窗的 resolve
+    let authFromButton = false; // 凭据弹窗由「凭据」按钮触发（提交后需手动重载文件树）
 
     // 拼到所有 fetch URL 上的 ?ref=，让后端用当前分支取数据（含默认分支，保持缓存键一致）。
     function refQuery() {
@@ -163,15 +174,46 @@
         document.getElementById('auth-username').style.display = t === 'basic' ? 'block' : 'none';
         document.getElementById('auth-password').style.display = t === 'basic' ? 'block' : 'none';
     });
-    document.getElementById('auth-cancel').addEventListener('click', () => closeAuth(null));
+    document.getElementById('auth-cancel').addEventListener('click', () => { authFromButton = false; closeAuth(null); });
     document.getElementById('auth-submit').addEventListener('click', () => {
         const type = document.getElementById('auth-type').value;
         const auth = { type };
         if (type === 'token') auth.token = document.getElementById('auth-token').value;
         else { auth.username = document.getElementById('auth-username').value; auth.password = document.getElementById('auth-password').value; }
         storeAuth(auth);
+        const fromButton = authFromButton;
+        authFromButton = false;
         closeAuth(auth);
+        // 由「凭据」按钮触发的提交：用户主动更换凭据后，重载文件树以应用新凭据。
+        // 401 自动触发的弹窗不需要这里重载——authFetch 会自行重试当前请求。
+        if (fromButton) {
+            const content = document.getElementById('floating-tree-content');
+            if (content) content.innerHTML = '<div class="tree-loading">加载中...</div>';
+            loadFileTree().then(autoOpenDefault);
+            toast.success('凭据已保存，正在重新加载');
+        }
     });
+
+    // 顶部「凭据」按钮：主动打开凭据输入框（用于私有仓库报错后手动输入，或更换凭据）。
+    // 预填已保存的凭据，便于查看/修改而非从零输入。
+    const authSiteBtn = document.getElementById('auth-site-btn');
+    if (authSiteBtn) {
+        authSiteBtn.addEventListener('click', () => {
+            const saved = getStoredAuth();
+            if (saved) {
+                document.getElementById('auth-type').value = saved.type || 'token';
+                document.getElementById('auth-type').dispatchEvent(new Event('change'));
+                if (saved.type === 'basic') {
+                    document.getElementById('auth-username').value = saved.username || '';
+                    document.getElementById('auth-password').value = saved.password || '';
+                } else {
+                    document.getElementById('auth-token').value = saved.token || '';
+                }
+            }
+            authFromButton = true;
+            promptAuth();
+        });
+    }
 
     // ---------- 删除站点 ----------
     (function initDelete() {
@@ -573,20 +615,37 @@
         }
 
         // ---- 缩为迷你浮岛（带 FLIP） ----
-        function toMiniIsland() {
+        function toMiniIsland(skipAnim) {
             // 首次最小化：把浮岛放到右下角附近（若没有保存位置）
             if (pos.dockLeft == null) {
                 const x = window.innerWidth - 56, y = window.innerHeight - 56;
                 pos.dockLeft = x; pos.dockTop = y; pos.dockSnap = null;
             }
-            flipMorph(() => {
+            const apply = () => {
                 applyDockPos(pos.dockLeft, pos.dockTop, pos.dockSnap);
                 win.classList.add('minimized');
-            });
+            };
+            if (skipAnim) {
+                // 启动时直接切迷你态，不做 FLIP（避免与 win-pop 入场动画的 transform 冲突）
+                win.style.transition = 'none';
+                win.style.animation = 'none';
+                apply();
+                win.getBoundingClientRect(); // commit
+                win.style.transition = '';
+                win.style.animation = '';
+            } else {
+                flipMorph(apply);
+            }
         }
         function fromMiniIsland() {
             flipMorph(() => {
                 win.classList.remove('minimized', 'snapped', 'snap-left', 'snap-right', 'snap-top', 'snap-bottom');
+                // 恢复展开态位置：用户拖过的位置优先，否则回 CSS 默认（top:80 right:24）
+                if (pos.winLeft != null) {
+                    win.style.left = pos.winLeft + 'px'; win.style.top = pos.winTop + 'px'; win.style.right = 'auto';
+                } else {
+                    win.style.left = ''; win.style.top = ''; win.style.right = '';
+                }
             });
         }
         minimize.addEventListener('click', e => { e.stopPropagation(); toMiniIsland(); });
@@ -648,8 +707,68 @@
             fromMiniIsland();
         });
 
-        // 默认展开浮窗
+        // ---- 启动态：默认缩为迷你浮岛（便于展示正文），首次访问弹气泡引导 ----
+        // 用户一旦手动展开过，记住偏好，之后默认展开，不再被反复收起打扰。
+        const EXPAND_KEY = 'gitweb_tree_start_expanded';
+        const BUBBLE_SEEN_KEY = 'gitweb_dock_bubble_seen';
+        const bubble = document.getElementById('dock-bubble');
+        const bubbleClose = document.getElementById('dock-bubble-close');
+
+        function showBubble() {
+            if (!bubble) return;
+            // 气泡贴在浮岛左侧（浮岛在右下角）；用 fixed 跟随浮岛当前位置
+            positionBubble();
+            bubble.style.display = 'flex';
+        }
+        function hideBubble(persist) {
+            if (bubble) bubble.style.display = 'none';
+            if (persist) { try { localStorage.setItem(BUBBLE_SEEN_KEY, '1'); } catch (e) {} }
+        }
+        function positionBubble() {
+            if (!bubble) return;
+            const r = win.getBoundingClientRect();
+            // 浮岛在右侧时气泡放左；贴左边缘时放右，避免溢出视口
+            const onRight = r.left > window.innerWidth / 2;
+            bubble.style.top = (r.top + r.height / 2) + 'px';
+            if (onRight) {
+                bubble.style.right = (window.innerWidth - r.left + 10) + 'px';
+                bubble.style.left = 'auto';
+                bubble.classList.remove('point-left');
+                bubble.classList.add('point-right');
+            } else {
+                bubble.style.left = (r.right + 10) + 'px';
+                bubble.style.right = 'auto';
+                bubble.classList.remove('point-right');
+                bubble.classList.add('point-left');
+            }
+        }
+
+        const startExpanded = (() => { try { return localStorage.getItem(EXPAND_KEY) === '1'; } catch (e) { return false; } })();
+        const bubbleSeen = (() => { try { return localStorage.getItem(BUBBLE_SEEN_KEY) === '1'; } catch (e) { return false; } })();
+
         win.classList.add('show');
+        if (startExpanded) {
+            // 已有偏好：直接展开，不弹气泡
+        } else {
+            // 默认缩为迷你浮岛（跳过 FLIP，避免与入场动画冲突）
+            toMiniIsland(true);
+            if (!bubbleSeen) {
+                // 浮岛落位后再定位气泡，避免位置错乱
+                setTimeout(showBubble, 60);
+            }
+        }
+
+        // 任何展开动作都关掉气泡；首次展开同时记偏好，以后默认展开
+        function onExpand() {
+            hideBubble(true);
+            try { localStorage.setItem(EXPAND_KEY, '1'); } catch (e) {}
+        }
+        minDock.addEventListener('click', onExpand);
+        if (bubbleClose) {
+            bubbleClose.addEventListener('click', e => { e.stopPropagation(); hideBubble(true); });
+        }
+        // 窗口尺寸变化时重新对齐气泡位置
+        window.addEventListener('resize', () => { if (bubble && bubble.style.display !== 'none') positionBubble(); });
     }
 
     // ---------- 标题栏滚动自动隐藏（知乎同款：下滑藏、上滑显、贴顶常显） ----------
@@ -689,6 +808,17 @@
                 lastY = area.scrollTop; // 重置基线，避免立刻又被滚走
             }
         });
+
+        // 触屏：iOS Safari 不派发 mousemove，需用 touchstart 在顶部唤回标题栏。
+        // 否则下滑隐藏后在触屏上无路恢复，按钮永远点不到。
+        area.addEventListener('touchstart', e => {
+            if (!header.classList.contains('head-hidden')) return;
+            const t = e.touches[0];
+            if (t && t.clientY < 70) {
+                header.classList.remove('head-hidden');
+                lastY = area.scrollTop; // 重置基线，避免立刻又被滚走
+            }
+        }, { passive: true });
     }
 
     // ---------- 工具 ----------
