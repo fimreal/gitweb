@@ -1,0 +1,90 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.os }}/${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: linux
+            arch: amd64
+            goarch: amd64
+          - os: linux
+            arch: arm64
+            goarch: arm64
+          - os: darwin
+            arch: amd64
+            goarch: amd64
+          - os: darwin
+            arch: arm64
+            goarch: arm64
+          - os: windows
+            arch: amd64
+            goarch: amd64
+            ext: .exe
+          - os: windows
+            arch: arm64
+            goarch: arm64
+            ext: .exe
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache: true
+
+      - name: Build
+        env:
+          GOOS: ${{ matrix.os }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+        run: |
+          mkdir -p dist
+          go build -trimpath -ldflags="-s -w -X main.version=${GITHUB_REF_NAME:-dev}" \
+            -o dist/gitweb${{ matrix.ext }} ./cmd/gitweb
+
+      # web/ ships next to the binary (assets are runtime-loaded, not embedded)
+      - name: Bundle web assets
+        run: |
+          cd dist
+          mkdir -p out/web
+          mv gitweb${{ matrix.ext }} out/
+          cp -r ../web out/
+          tar -czf gitweb-${{ matrix.os }}-${{ matrix.arch }}.tar.gz -C out .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gitweb-${{ matrix.os }}-${{ matrix.arch }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  release:
+    name: Publish Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: dist/*.tar.gz
