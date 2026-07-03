@@ -67,6 +67,7 @@ func (s *Server) SetupRoutes() *gin.Engine {
 		api.DELETE("/sites/:pathid", s.handleDeleteSite)
 		api.POST("/sites/:pathid/refresh", s.handleRefreshSite)
 		api.GET("/sites/:pathid/tree", s.handleGetTree)
+		api.GET("/sites/:pathid/branches", s.handleListBranches)
 	}
 
 	// /:pathid/*filepath 同时承载 viewer 页面（空 filepath）与文件内容（有 filepath）。
@@ -183,7 +184,10 @@ func (s *Server) handleGetTree(c *gin.Context) {
 	// 凭据从请求头透传（运行时输入，存浏览器 sessionStorage），用完即弃。
 	auth := authFromHeader(c, site.Auth)
 
-	tree, err := s.provider.FetchTree(context.Background(), site.Provider, site.GitURL, site.Ref, auth)
+	// ?ref= 用于 viewer 临时切换分支：覆盖 site.Ref，但不写入 state。
+	ref := effectiveRef(c, site.Ref)
+
+	tree, err := s.provider.FetchTree(context.Background(), site.Provider, site.GitURL, ref, auth)
 	if err != nil {
 		if errors.Is(err, provider.ErrAuthRequired) {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
@@ -195,6 +199,38 @@ func (s *Server) handleGetTree(c *gin.Context) {
 
 	filtered := provider.FilterRenderableFiles(tree, s.renderer.IsRenderable)
 	c.JSON(http.StatusOK, gin.H{"files": filtered})
+}
+
+// handleListBranches 列出仓库分支，供 viewer 临时切换分支下拉使用。
+func (s *Server) handleListBranches(c *gin.Context) {
+	pathID := c.Param("pathid")
+
+	site, err := s.registry.Get(pathID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "site not found"})
+		return
+	}
+
+	auth := authFromHeader(c, site.Auth)
+
+	branches, err := s.provider.ListBranches(context.Background(), site.Provider, site.GitURL, auth)
+	if err != nil {
+		if errors.Is(err, provider.ErrAuthRequired) {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+			return
+		}
+		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to list branches: " + err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"branches": branches, "current": site.Ref})
+}
+
+// effectiveRef 从 ?ref= query 取临时分支，空则回退 site 默认 ref。
+func effectiveRef(c *gin.Context, defaultRef string) string {
+	if r := strings.TrimSpace(c.Query("ref")); r != "" {
+		return r
+	}
+	return defaultRef
 }
 
 func (s *Server) handleSiteFile(c *gin.Context) {
@@ -237,16 +273,19 @@ func (s *Server) handleSiteFile(c *gin.Context) {
 	// 凭据从请求头透传（运行时输入），不与缓存关联、用完即弃。
 	auth := authFromHeader(c, site.Auth)
 
+	// ?ref= 临时切换分支（不写入 state）。缓存键带上 ref，避免不同分支同路径串缓存。
+	ref := effectiveRef(c, site.Ref)
+
 	// 缓存键不含凭据（凭据可能因用户而异）。缓存的是文件字节/片段，
 	// 公开仓库内容对所有用户一致；私有仓库的内容也按 pathid:filepath 共享缓存——
 	// 若需更严格隔离，可把缓存限定为公开仓库（此处按 YAGNI 暂不区分）。
-	cacheKey := fmt.Sprintf("%s:%s", pathID, filepath)
+	cacheKey := fmt.Sprintf("%s:%s:%s", pathID, ref, filepath)
 	if cached, ok := s.cache.Get(cacheKey); ok {
 		s.serveContent(c, filepath, cached)
 		return
 	}
 
-	content, err := s.provider.Fetch(context.Background(), site.Provider, site.GitURL, site.Ref, filepath, auth)
+	content, err := s.provider.Fetch(context.Background(), site.Provider, site.GitURL, ref, filepath, auth)
 	if err != nil {
 		s.serveFetchError(c, err)
 		return
