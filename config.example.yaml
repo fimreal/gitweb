@@ -22,7 +22,7 @@ fetch:
 
 sites:
   - git_url: https://github.com/fimreal/gitweb.git
-    pathid: example
+    pathid: gitweb
     ref: main
     # auth is only for preloaded private repos. For repos registered at runtime,
     # enter credentials in the browser when the repo is opened.

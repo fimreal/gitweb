@@ -1,0 +1,94 @@
+/* gitweb toast —— 左下角动态浮窗 */
+.toast-container {
+    position: fixed;
+    left: 20px;
+    bottom: 20px;
+    z-index: 10000;
+    display: flex;
+    flex-direction: column-reverse; /* 新消息沉底，栈在旧消息下方 */
+    gap: 10px;
+    max-width: min(380px, calc(100vw - 40px));
+    pointer-events: none;
+}
+
+.toast-item {
+    pointer-events: auto;
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 11px 12px 11px 13px;
+    border-radius: var(--r-md);
+    background: var(--glass-bg);
+    backdrop-filter: blur(var(--glass-blur));
+    -webkit-backdrop-filter: blur(var(--glass-blur));
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow-lg);
+    color: var(--fg);
+    font-size: 13px;
+    line-height: 1.45;
+    opacity: 0;
+    transform: translateX(-14px) scale(0.98);
+    transition: opacity 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+                transform 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+    overflow: hidden;
+}
+.toast-item.visible {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+}
+
+.toast-icon {
+    flex-shrink: 0;
+    width: 18px;
+    height: 18px;
+    margin-top: 1px;
+    display: flex;
+}
+.toast-icon svg { width: 18px; height: 18px; }
+.toast-text {
+    flex: 1;
+    min-width: 0;
+    word-break: break-word;
+}
+
+.toast-close {
+    flex-shrink: 0;
+    background: transparent;
+    border: none;
+    color: var(--secondary);
+    width: 20px;
+    height: 20px;
+    margin-top: -1px;
+    margin-right: -3px;
+    border-radius: var(--r-sm);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+.toast-close:hover { background: var(--hover-bg); color: var(--fg); }
+.toast-close svg { width: 13px; height: 13px; }
+
+/* 类型色调（只染图标，文字保持中性） */
+.toast-info .toast-icon { color: var(--accent); }
+.toast-success .toast-icon { color: #16a34a; }
+.toast-error .toast-icon { color: #dc2626; }
+.toast-error {
+    border-color: rgba(220, 38, 38, 0.28);
+    background: rgba(254, 242, 242, 0.92);
+}
+[data-theme="dark"] .toast-error, :root:not([data-theme="light"]) .toast-error {
+    background: rgba(76, 16, 16, 0.78);
+    border-color: rgba(220, 38, 38, 0.4);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .toast-item { transition: opacity 0.15s ease; transform: none; }
+}
+
+/* 小屏：贴左下、留出更宽边距 */
+@media (max-width: 480px) {
+    .toast-container { left: 12px; right: 12px; bottom: 12px; max-width: none; }
+    .toast-item { font-size: 12.5px; }
+}

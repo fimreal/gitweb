@@ -104,9 +104,11 @@
                     document.getElementById('git_url').value = '';
                     document.getElementById('pathid').value = '';
                     loadSites();
+                    toast.success(currentLang === 'zh' ? '注册成功' : 'Registration successful');
                 } else {
                     resultDiv.className = 'error';
                     resultDiv.innerHTML = `<strong>${currentLang === 'zh' ? '✗ 错误' : '✗ Error'}:</strong> ${result.error}`;
+                    toast.error((currentLang === 'zh' ? '注册失败' : 'Registration failed') + ': ' + (result.error || response.status));
                 }
 
                 resultDiv.style.display = 'block';
@@ -115,6 +117,7 @@
                 resultDiv.className = 'error';
                 resultDiv.innerHTML = `<strong>${currentLang === 'zh' ? '✗ 网络错误' : '✗ Network error'}:</strong> ${error.message}`;
                 resultDiv.style.display = 'block';
+                toast.error((currentLang === 'zh' ? '网络错误' : 'Network error') + ': ' + error.message);
             }
         });
     }

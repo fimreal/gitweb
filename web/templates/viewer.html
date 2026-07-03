@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ .RepoName }} - gitweb</title>
     <link rel="stylesheet" href="/static/css/viewer.css">
+    <link rel="stylesheet" href="/static/css/toast.css">
 </head>
 <body>
     <!-- 浮动文件树窗口：可拖动 / 可缩放 / 可缩为迷你浮岛（贴边吸附） -->
@@ -17,6 +18,9 @@
                 文件目录
             </h3>
             <div class="floating-tree-controls">
+                <button class="floating-tree-btn refresh" id="refresh-tree-btn" title="刷新文件树" aria-label="刷新文件树">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
+                </button>
                 <button class="floating-tree-btn minimize" id="minimize-btn" title="缩为迷你浮岛" aria-label="缩小">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M5 12h14"/></svg>
                 </button>
@@ -38,8 +42,18 @@
         <div class="viewer-header">
             <div class="repo-info">
                 <h1 id="repo-title">{{ .RepoName }}</h1>
-                <span class="repo-ref" id="repo-ref">{{ .Ref }}</span>
-                <span class="views-badge" title="浏览量" data-en="Views" data-zh="浏览">👁 {{ .Views }}</span>
+                <div class="branch-switcher" id="branch-switcher">
+                    <button class="repo-ref branch-trigger" id="branch-trigger" type="button"
+                            title="切换分支" aria-haspopup="listbox" aria-expanded="false">
+                        <svg class="branch-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="6" r="2.5"/><path d="M6 8.5v7"/><path d="M6 12h6a3 3 0 0 0 3-3V8.5"/></svg>
+                        <span class="branch-name" id="branch-name">{{ .Ref }}</span>
+                        <svg class="branch-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+                    </button>
+                    <div class="branch-menu" id="branch-menu" role="listbox" aria-label="分支">
+                        <div class="branch-menu-loading">加载中...</div>
+                    </div>
+                </div>
+                <span class="views-badge" title="浏览量" data-en="Views" data-zh="浏览"><span class="views-label">浏览</span> {{ .Views }}</span>
             </div>
             <div class="content-header-actions">
                 <a href="/" class="home-link">← 首页</a>
@@ -84,6 +98,7 @@
         </div>
     </div>
 
+<script src="/static/js/toast.js"></script>
 <script nonce="{{ .Nonce }}">
 (function () {
     const pathID = '{{ .PathID }}';
@@ -92,7 +107,13 @@
     const STORAGE_KEY = 'gitweb_auth_' + pathID;
     let allFiles = [];
     let currentPath = '';
+    let currentRef = '{{ .Ref }}'; // 临时分支：切换分支时改写，不持久化
     let authResolve = null; // 凭据弹窗的 resolve
+
+    // 拼到所有 fetch URL 上的 ?ref=，让后端用当前分支取数据（含默认分支，保持缓存键一致）。
+    function refQuery() {
+        return '?ref=' + encodeURIComponent(currentRef);
+    }
 
     // ---------- 凭据（sessionStorage，仅当前标签页） ----------
     function getStoredAuth() {
@@ -179,9 +200,9 @@
                     return;
                 }
                 const data = await resp.json().catch(() => ({}));
-                alert('删除失败: ' + (data.error || resp.status));
+                toast.error('删除失败: ' + (data.error || resp.status));
             } catch (err) {
-                alert('删除失败: ' + err.message);
+                toast.error('删除失败: ' + err.message);
             }
             deleteConfirm.disabled = false;
             deleteConfirm.textContent = '删除';
@@ -190,19 +211,24 @@
 
     // ---------- 文件树 ----------
     async function loadFileTree() {
+        const content = document.getElementById('floating-tree-content');
         try {
-            const resp = await authFetch('/api/sites/' + pathID + '/tree');
+            const resp = await authFetch('/api/sites/' + pathID + '/tree' + refQuery());
             if (!resp.ok) {
-                document.getElementById('floating-tree-content').innerHTML =
-                    '<div class="tree-error">加载文件树失败（' + resp.status + '）</div>';
+                allFiles = [];
+                const msg = '加载文件树失败（' + resp.status + '）';
+                if (content) content.innerHTML = '<div class="tree-error">' + msg + '</div>';
+                toast.error(msg);
                 return;
             }
             const data = await resp.json();
             allFiles = data.files || [];
             renderTree(allFiles);
         } catch (err) {
-            document.getElementById('floating-tree-content').innerHTML =
-                '<div class="tree-error">加载文件树失败: ' + err.message + '</div>';
+            allFiles = []; // 清空旧分支文件列表，避免 autoOpenDefault 用过期列表发请求
+            const msg = '加载文件树失败: ' + err.message;
+            if (content) content.innerHTML = '<div class="tree-error">' + msg + '</div>';
+            toast.error(msg);
         }
     }
 
@@ -287,16 +313,23 @@
             }
             // 图片：直接 <img>
             if (/\.(png|jpe?g|gif|bmp|webp|svg|ico)$/i.test(path)) {
-                area.innerHTML = '<div class="image-container"><img src="/' + pathID + '/' + encodeURI(path) + '" alt="' + escapeHtml(path) + '"></div>';
+                area.innerHTML = '<div class="image-container"><img src="/' + pathID + '/' + encodeURI(path) + refQuery() + '" alt="' + escapeHtml(path) + '"></div>';
                 return;
             }
             // md/txt/代码：后端返回 HTML 片段，前端注入。长内容前端分页。
-            const resp = await authFetch('/' + pathID + '/' + encodeURI(path));
-            if (!resp.ok) { area.innerHTML = '<div class="error">加载失败（' + resp.status + '）</div>'; return; }
+            const resp = await authFetch('/' + pathID + '/' + encodeURI(path) + refQuery());
+            if (!resp.ok) {
+                const msg = '加载失败（' + resp.status + '）';
+                area.innerHTML = '<div class="error">' + msg + '</div>';
+                toast.error(msg);
+                return;
+            }
             const html = await resp.text();
             renderTextWithPagination(area, path, html);
         } catch (err) {
-            area.innerHTML = '<div class="error">加载失败: ' + err.message + '</div>';
+            const msg = '加载失败: ' + err.message;
+            area.innerHTML = '<div class="error">' + msg + '</div>';
+            toast.error(msg);
         }
     }
 
@@ -305,10 +338,10 @@
         const notice = document.createElement('div');
         notice.className = 'html-notice';
         notice.innerHTML = '⚠️ HTML 在隔离的沙箱中显示（禁用脚本）。'
-            + '<a href="/' + pathID + '/' + encodeURI(path) + '" target="_blank">在新标签页打开</a>';
+            + '<a href="/' + pathID + '/' + encodeURI(path) + refQuery() + '" target="_blank">在新标签页打开</a>';
         const iframe = document.createElement('iframe');
         iframe.className = 'html-frame';
-        iframe.src = '/' + pathID + '/' + encodeURI(path);
+        iframe.src = '/' + pathID + '/' + encodeURI(path) + refQuery();
         // sandbox 不加 allow-scripts：防不可信仓库的恶意脚本执行
         iframe.setAttribute('sandbox', 'allow-same-origin');
         area.innerHTML = '';
@@ -666,11 +699,107 @@
         return (b / 1048576).toFixed(1) + ' MB';
     }
 
+    // ---------- 分支切换器 ----------
+    // 点击 ref chip 弹出分支列表，选中后临时切换 currentRef（不写 state），重拉文件树。
+    function initBranchSwitcher() {
+        const trigger = document.getElementById('branch-trigger');
+        const menu = document.getElementById('branch-menu');
+        const nameEl = document.getElementById('branch-name');
+        if (!trigger || !menu || !nameEl) return;
+
+        let loaded = false;
+        let branches = [];
+        let open = false;
+
+        function render() {
+            if (!branches.length) {
+                menu.innerHTML = '<div class="branch-menu-empty">无可切换分支</div>';
+                return;
+            }
+            menu.innerHTML = branches.map(b =>
+                '<button type="button" class="branch-item' + (b === currentRef ? ' active' : '') +
+                '" data-ref="' + escapeHtml(b) + '" role="option" aria-selected="' + (b === currentRef ? 'true' : 'false') + '">' +
+                escapeHtml(b) + '</button>'
+            ).join('');
+            menu.querySelectorAll('.branch-item').forEach(btn => {
+                btn.addEventListener('click', () => selectRef(btn.dataset.ref));
+            });
+        }
+
+        async function load() {
+            menu.innerHTML = '<div class="branch-menu-loading">加载中...</div>';
+            try {
+                const resp = await authFetch('/api/sites/' + pathID + '/branches');
+                if (!resp.ok) {
+                    menu.innerHTML = '<div class="branch-menu-error">加载分支失败（' + resp.status + '）</div>';
+                    toast.error('加载分支失败（' + resp.status + '）');
+                    return;
+                }
+                const data = await resp.json();
+                branches = data.branches || [];
+                loaded = true;
+                render();
+            } catch (err) {
+                menu.innerHTML = '<div class="branch-menu-error">加载分支失败: ' + escapeHtml(err.message) + '</div>';
+                toast.error('加载分支失败: ' + err.message);
+            }
+        }
+
+        function selectRef(ref) {
+            if (ref === currentRef) { close(); return; }
+            currentRef = ref;
+            nameEl.textContent = ref;
+            close();
+            // 重拉文件树；清空当前文件内容（旧分支的文件路径可能不存在）
+            const area = document.getElementById('content-area');
+            if (area) area.innerHTML = '<div class="welcome">切换到分支 ' + escapeHtml(ref) + '...</div>';
+            loadFileTree().then(autoOpenDefault);
+            toast.info('已切换到分支 ' + ref);
+        }
+
+        function openMenu() {
+            open = true;
+            trigger.setAttribute('aria-expanded', 'true');
+            menu.classList.add('open');
+            if (!loaded) load();
+            else render(); // 已加载过则刷新 active 高亮（currentRef 可能已切换）
+        }
+        function close() {
+            open = false;
+            trigger.setAttribute('aria-expanded', 'false');
+            menu.classList.remove('open');
+        }
+        function toggle() { open ? close() : openMenu(); }
+
+        trigger.addEventListener('click', (e) => { e.stopPropagation(); toggle(); });
+        document.addEventListener('click', (e) => { if (open && !menu.contains(e.target) && e.target !== trigger) close(); });
+        document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && open) close(); });
+    }
+
     // ---------- 启动 ----------
     document.addEventListener('DOMContentLoaded', () => {
         initFloatingTree();
         initAutoHideHeader();
+        initBranchSwitcher();
         loadFileTree().then(autoOpenDefault);
+
+        const refreshBtn = document.getElementById('refresh-tree-btn');
+        if (refreshBtn) {
+            refreshBtn.addEventListener('click', () => {
+                if (refreshBtn.classList.contains('spinning')) return; // 防连点
+                refreshBtn.classList.add('spinning');
+                const content = document.getElementById('floating-tree-content');
+                if (content) content.innerHTML = '<div class="tree-loading">刷新中...</div>';
+                loadFileTree().then(() => {
+                    if (allFiles.length > 0) toast.success('文件树已刷新');
+                }).finally(() => {
+                    // 动画结束移除 class（animationend 兜底 + 超时兜底）
+                    const done = () => refreshBtn.classList.remove('spinning');
+                    refreshBtn.addEventListener('animationend', done, { once: true });
+                    setTimeout(done, 900);
+                });
+            });
+        }
     });
 })();
 </script>

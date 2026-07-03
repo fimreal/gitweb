@@ -159,12 +159,95 @@ body {
     flex-shrink: 0;
     border: 1px solid transparent;
 }
+
+/* 分支切换器 */
+.branch-switcher { position: relative; flex-shrink: 0; }
+.branch-trigger {
+    /* 重置 button 默认：避免 UA padding/font 把按钮和图标撑大 */
+    font: inherit;
+    font-size: 12px;
+    line-height: 1;
+    margin: 0;
+    padding: 3px 9px;
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease;
+}
+.branch-trigger:hover { background: var(--accent-soft); border-color: var(--accent); }
+.branch-trigger .branch-icon { width: 13px; height: 13px; flex-shrink: 0; display: block; }
+.branch-trigger .branch-name { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.branch-trigger .branch-caret { width: 12px; height: 12px; flex-shrink: 0; opacity: 0.6; transition: transform 0.2s ease; display: block; }
+.branch-switcher.open .branch-caret,
+.branch-trigger[aria-expanded="true"] .branch-caret { transform: rotate(180deg); }
+
+.branch-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    min-width: 180px;
+    max-width: 280px;
+    max-height: 320px;
+    overflow-y: auto;
+    background: var(--glass-bg);
+    backdrop-filter: blur(var(--glass-blur));
+    -webkit-backdrop-filter: blur(var(--glass-blur));
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    box-shadow: var(--shadow-lg);
+    padding: 5px;
+    z-index: 100;
+    opacity: 0;
+    transform: translateY(-6px) scale(0.98);
+    pointer-events: none;
+    transition: opacity 0.18s cubic-bezier(0.16, 1, 0.3, 1), transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.branch-menu.open {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    pointer-events: auto;
+}
+.branch-item {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: transparent;
+    border: none;
+    color: var(--fg);
+    padding: 7px 10px;
+    border-radius: var(--r-sm);
+    font-size: 12.5px;
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    transition: background 0.12s ease;
+}
+.branch-item:hover { background: var(--hover-bg); }
+.branch-item.active { color: var(--accent); font-weight: 600; background: var(--accent-soft); }
+.branch-menu-loading, .branch-menu-empty, .branch-menu-error {
+    padding: 8px 10px;
+    font-size: 12px;
+    color: var(--secondary);
+}
+.branch-menu-error { color: #dc2626; }
+@media (prefers-reduced-motion: reduce) {
+    .branch-menu { transition: opacity 0.15s ease; transform: none; }
+    .branch-caret { transition: none; }
+}
 .views-badge {
     color: var(--secondary);
     font-size: 12px;
     font-weight: 500;
     flex-shrink: 0;
     font-variant-numeric: tabular-nums;
+}
+.views-badge .views-label {
+    color: var(--tertiary, #94a3b8);
+    margin-right: 3px;
+    font-weight: 400;
 }
 
 .content-header-actions {
@@ -378,6 +461,13 @@ body {
 .floating-tree-btn svg { width: 15px; height: 15px; }
 .floating-tree-btn:hover { background: var(--hover-bg); color: var(--fg); }
 .floating-tree-btn.minimize:hover { color: var(--accent); }
+.floating-tree-btn.refresh.spinning svg {
+    animation: ft-spin 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+}
+@keyframes ft-spin { from { transform: rotate(0deg); } to { transform: rotate(-360deg); } }
+@media (prefers-reduced-motion: reduce) {
+    .floating-tree-btn.refresh.spinning svg { animation: none; }
+}
 
 /* 迷你浮岛态：中间的图标（白色，叠在渐变底上） */
 .min-dock {
