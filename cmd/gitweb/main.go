@@ -18,6 +18,9 @@ import (
 	"github.com/limingrui/gitweb/internal/server"
 )
 
+// version 在构建时通过 -ldflags "-X main.version=..." 注入，默认 dev。
+var version = "dev"
+
 func main() {
 	configPath := flag.String("config", "", "path to config file")
 	listen := flag.String("listen", "", "listen address (overrides config)")
@@ -25,7 +28,13 @@ func main() {
 	httpProxy := flag.String("http-proxy", "", "HTTP proxy (overrides config and env)")
 	httpsProxy := flag.String("https-proxy", "", "HTTPS proxy (overrides config and env)")
 	statePath := flag.String("state", "./gitweb.state.json", "path to state file for persisted sites (empty = in-memory only)")
+	showVersion := flag.Bool("v", false, "print version and exit")
 	flag.Parse()
+
+	if *showVersion {
+		log.Printf("gitweb %s", version)
+		return
+	}
 
 	var cfg *config.Config
 	var err error
