@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/sync/singleflight"
@@ -18,6 +19,9 @@ var (
 	ErrTooLarge     = errors.New("file too large")
 	ErrAuthRequired = errors.New("authentication required")
 )
+
+// probeTimeout 限制单次 provider 探测的耗时，避免死 host 拖慢注册。
+const probeTimeout = 5 * time.Second
 
 // providerBase 各 provider 共享的配置：SSRF 白/黑名单与单文件大小上限。
 type providerBase struct {
@@ -62,11 +66,12 @@ type Provider interface {
 }
 
 type Manager struct {
-	client  *http.Client
-	sf      singleflight.Group
-	allow   []string
-	deny    []string
-	maxSize int64
+	client     *http.Client
+	sf         singleflight.Group
+	allow      []string
+	deny       []string
+	maxSize    int64
+	probeCache sync.Map // host(string) -> providerType(string)；只缓存正例
 }
 
 func NewManager(timeout time.Duration, httpProxy, httpsProxy string, allow, deny []string, maxSize int64) *Manager {
@@ -361,8 +366,15 @@ func (p *GenericProvider) Fetch(ctx context.Context, gitURL, ref, filepath strin
 	return nil, errors.New("generic provider not yet implemented")
 }
 
-// IdentifyProvider 识别 Git URL 的提供商类型
+// IdentifyProvider 识别 Git URL 的提供商类型。
+// 已知关键字（github.com / gitlab.com / 含 gitea / gitlab 子串）走快速路径，
+// 不发网络请求；自托管实例（域名不含关键字）回退到 API 探测：
+//   GET <scheme>://<host>/api/v1/version  → 200 即 Gitea
+//   GET <scheme>://<host>/api/v4/version  → 200 即 GitLab
+// 探测正例按 host 缓存，避免对同一自托管站点重复探测；探测走 m.client（代理/超时生效），
+// 且每个探测 URL 先过 SSRF 校验。均未命中返回 ""。
 func (m *Manager) IdentifyProvider(gitURL string) string {
+	// 快速路径：关键字匹配，零网络开销
 	if strings.Contains(gitURL, "github.com") {
 		return "github"
 	}
@@ -371,6 +383,79 @@ func (m *Manager) IdentifyProvider(gitURL string) string {
 	}
 	if strings.Contains(gitURL, "gitea") {
 		return "gitea"
+	}
+
+	// 回退：API 探测自托管实例
+	scheme, host, ok := probeHost(gitURL)
+	if !ok {
+		return ""
+	}
+	if v, ok := m.probeCache.Load(host); ok {
+		return v.(string)
+	}
+
+	// singleflight 去重：同一 host 的并发探测只发一次
+	v, err, _ := m.sf.Do("probe:"+host, func() (interface{}, error) {
+		if v, ok := m.probeCache.Load(host); ok { // 二次查缓存，前一个 flight 可能刚写入
+			return v.(string), nil
+		}
+		pt := m.probeProvider(scheme, host)
+		if pt != "" {
+			m.probeCache.Store(host, pt)
+		}
+		return pt, nil
+	})
+	if err != nil {
+		return ""
+	}
+	return v.(string)
+}
+
+// probeHost 从 gitURL 解析 scheme 与 host（含端口），scheme 缺省 https。
+// 与 parseGiteaURL/parseGitLabURL 解耦：只需 scheme+host，对裸域名也成立。
+func probeHost(gitURL string) (scheme, host string, ok bool) {
+	u, err := url.Parse(gitURL)
+	if err != nil || u.Host == "" {
+		return "", "", false
+	}
+	scheme = u.Scheme
+	if scheme == "" {
+		scheme = "https"
+	}
+	return scheme, u.Host, true
+}
+
+// probeProvider 依次探测 Gitea(/api/v1/version) 与 GitLab(/api/v4/version)。
+// 每个探测 URL 先过 SSRF 校验，再用 m.client 发送（复用代理与超时）。
+// 命中 200 即返回 "gitea"/"gitlab"；均未命中（含 SSRF 拦截、超时、非 200）返回 ""。
+func (m *Manager) probeProvider(scheme, host string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
+	defer cancel()
+
+	probes := []struct {
+		typ string
+		end string
+	}{
+		{"gitea", fmt.Sprintf("%s://%s/api/v1/version", scheme, host)},
+		{"gitlab", fmt.Sprintf("%s://%s/api/v4/version", scheme, host)},
+	}
+	for _, p := range probes {
+		if !allowedURL(p.end, m.allow, m.deny) {
+			continue // SSRF 拦截：跳过该探测
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.end, nil)
+		if err != nil {
+			continue
+		}
+		resp, err := m.client.Do(req)
+		if err != nil {
+			continue // 超时/连接失败：试下一个
+		}
+		io.Copy(io.Discard, resp.Body) // 排空以便连接复用
+		resp.Body.Close()
+		if resp.StatusCode == http.StatusOK {
+			return p.typ
+		}
 	}
 	return ""
 }

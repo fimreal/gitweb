@@ -1,5 +1,5 @@
 # Binaries
-gitweb
+/gitweb
 *.exe
 *.exe~
 *.dll
@@ -18,6 +18,9 @@ go.work
 # Config files with secrets
 config.yaml
 *.secret.yaml
+
+# Runtime state (persisted registered sites)
+gitweb.state.json
 
 # IDE
 .vscode/

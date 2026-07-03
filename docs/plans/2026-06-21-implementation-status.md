@@ -1,6 +1,6 @@
 # gitweb 实现状态文档
 
-更新时间：2026-07-01（公开服务重构后）
+更新时间：2026-07-03（浏览数统计 + 首页站点列表浮层）
 
 ## 本期重构要点
 
@@ -45,15 +45,24 @@
 - viewer：浮动可拖拽文件树窗口 + 气泡按钮；暗黑模式（CSS 变量）；凭据输入弹窗
 - 首页：注册表单（无凭据字段，凭据运行时输入）；中英双语；暗黑模式
 - 长纯文本前端分页
+- **首页右下角站点列表入口按钮**：点击弹出玻璃浮层，内含搜索框（pathid/url/ref/provider 实时过滤）+ 翻页（每页 5 条）+ 站点卡片列表。浮层数据打开时按需 `fetch /api/sites` 加载。
+- **viewer 标题栏浏览数徽章**：repo-ref 旁显示「👁 N」，N 为该站点累计被打开次数。
+
+### 站点浏览数统计
+- `Site` 结构体新增 `Views int64`；`stateRecord` 新增 `views` 字段（`omitempty`，向后兼容旧 state 文件）。
+- 每次 `handleSiteFile` 空 filepath 分支（即打开 viewer 页面）调用 `registry.IncrementViews(pathid)`，内存累加 + 置 dirty，**不立即写盘**。
+- `Registry` 启用持久化时开一个 flush goroutine，每 5 秒把 dirty 浏览数落盘一次，避免每次访问写盘。
+- `main.go` 改为 `http.Server` + `signal.Notify(SIGINT/SIGTERM)` 优雅退出：收到信号后 `Shutdown(ctx)` 再 `reg.Close()`（最后 flush 一次），重启不丢浏览数。
+- `GET /api/sites` 响应增加 `"views"` 字段。
 
 ### API
 ```
 POST   /api/sites                    创建站点（无鉴权）
-GET    /api/sites                    列出所有站点
+GET    /api/sites                    列出所有站点（含 views 浏览数）
 DELETE /api/sites/:pathid            删除站点
 POST   /api/sites/:pathid/refresh    刷新缓存
 GET    /api/sites/:pathid/tree       获取文件树（可带 Authorization 访问私有仓库）
-GET    /:pathid/*filepath            viewer 页面 / 文件内容
+GET    /:pathid/*filepath            viewer 页面（Views+1）/ 文件内容
 ```
 
 ### 测试

@@ -7,17 +7,26 @@
     <link rel="stylesheet" href="/static/css/viewer.css">
 </head>
 <body>
-    <!-- 浮动气泡按钮：打开文件树窗口 -->
-    <button class="floating-bubble" id="floating-bubble" title="打开文件目录">📁</button>
-
-    <!-- 浮动文件树窗口 -->
+    <!-- 浮动文件树窗口：可拖动 / 可缩放 / 可缩为迷你浮岛（贴边吸附） -->
     <div class="floating-tree-window" id="floating-tree-window">
         <div class="floating-tree-titlebar" id="floating-tree-titlebar">
-            <h3>📁 文件目录</h3>
+            <h3>
+                <svg class="ft-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+                </svg>
+                文件目录
+            </h3>
             <div class="floating-tree-controls">
-                <button class="floating-tree-btn" id="minimize-btn" title="缩小为气泡">−</button>
-                <button class="floating-tree-btn" id="close-btn" title="关闭">×</button>
+                <button class="floating-tree-btn minimize" id="minimize-btn" title="缩为迷你浮岛" aria-label="缩小">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M5 12h14"/></svg>
+                </button>
             </div>
+        </div>
+        <!-- 迷你浮岛态：居中显示的图标（可拖动、贴边吸附） -->
+        <div class="min-dock" id="min-dock" title="点击展开 · 拖到边缘吸附">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+            </svg>
         </div>
         <div class="floating-tree-content" id="floating-tree-content">
             <div class="tree-loading">加载中...</div>
@@ -30,9 +39,11 @@
             <div class="repo-info">
                 <h1 id="repo-title">{{ .RepoName }}</h1>
                 <span class="repo-ref" id="repo-ref">{{ .Ref }}</span>
+                <span class="views-badge" title="浏览量" data-en="Views" data-zh="浏览">👁 {{ .Views }}</span>
             </div>
             <div class="content-header-actions">
                 <a href="/" class="home-link">← 首页</a>
+                <button class="delete-btn" id="delete-site-btn" title="删除此站点">🗑 删除</button>
             </div>
         </div>
         <div class="content-area" id="content-area">
@@ -61,10 +72,23 @@
         </div>
     </div>
 
-<script>
+    <!-- 删除确认弹窗 -->
+    <div class="auth-modal" id="delete-modal" style="display:none;">
+        <div class="auth-modal-card">
+            <h2>确认删除？</h2>
+            <p>即将删除站点 <strong id="delete-pathid"></strong>（<span id="delete-repo"></span>）。此操作不可撤销，删除后将返回首页。</p>
+            <div class="auth-actions">
+                <button id="delete-cancel">取消</button>
+                <button id="delete-confirm" class="primary">删除</button>
+            </div>
+        </div>
+    </div>
+
+<script nonce="{{ .Nonce }}">
 (function () {
     const pathID = '{{ .PathID }}';
     const repoName = '{{ .RepoName }}';
+    const gitURL = '{{ .GitURL }}';
     const STORAGE_KEY = 'gitweb_auth_' + pathID;
     let allFiles = [];
     let currentPath = '';
@@ -128,6 +152,42 @@
         closeAuth(auth);
     });
 
+    // ---------- 删除站点 ----------
+    (function initDelete() {
+        const deleteBtn = document.getElementById('delete-site-btn');
+        const deleteModal = document.getElementById('delete-modal');
+        const deleteCancel = document.getElementById('delete-cancel');
+        const deleteConfirm = document.getElementById('delete-confirm');
+        if (!deleteBtn || !deleteModal) return;
+
+        deleteBtn.addEventListener('click', () => {
+            document.getElementById('delete-pathid').textContent = pathID;
+            document.getElementById('delete-repo').textContent = repoName;
+            deleteModal.style.display = 'flex';
+        });
+
+        deleteCancel.addEventListener('click', () => { deleteModal.style.display = 'none'; });
+
+        deleteConfirm.addEventListener('click', async () => {
+            deleteConfirm.disabled = true;
+            deleteConfirm.textContent = '删除中...';
+            try {
+                // 管理操作，无需凭据；connect-src 'self' 允许同源 fetch。
+                const resp = await fetch('/api/sites/' + encodeURIComponent(pathID), { method: 'DELETE' });
+                if (resp.ok) {
+                    window.location.href = '/'; // 删除成功，回首页
+                    return;
+                }
+                const data = await resp.json().catch(() => ({}));
+                alert('删除失败: ' + (data.error || resp.status));
+            } catch (err) {
+                alert('删除失败: ' + err.message);
+            }
+            deleteConfirm.disabled = false;
+            deleteConfirm.textContent = '删除';
+        });
+    })();
+
     // ---------- 文件树 ----------
     async function loadFileTree() {
         try {
@@ -167,18 +227,26 @@
         attachTreeEvents();
     }
 
+    // 图标内联 SVG（class 受 CSS 控制，颜色随状态切换）
+    const ICON = {
+        chevron: '<svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>',
+        chevronSpacer: '<span class="chevron-spacer" aria-hidden="true"></span>',
+        folder: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>',
+        file: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>'
+    };
+
     function renderNode(node, level) {
         let html = '';
         Object.keys(node._dirs).sort().forEach(dir => {
-            html += '<div class="folder-item" data-level="' + level + '" style="padding-left:' + (level * 16) + 'px">'
-                + '<span class="folder-icon">📁</span><span class="folder-name">' + escapeHtml(dir) + '</span></div>'
+            html += '<div class="folder-item" data-level="' + level + '" style="padding-left:' + (level * 14 + 6) + 'px">'
+                + ICON.chevron + '<span class="folder-icon">' + ICON.folder + '</span><span class="folder-name">' + escapeHtml(dir) + '</span></div>'
                 + '<div class="folder-children" style="display:none">' + renderNode(node._dirs[dir], level + 1) + '</div>';
         });
         node._files.sort((a, b) => a.name.localeCompare(b.name));
         node._files.forEach(file => {
-            html += '<div class="file-item" data-path="' + escapeHtml(file.path) + '" data-level="' + level + '" style="padding-left:' + (level * 16 + 16) + 'px">'
-                + '<span class="file-icon">📄</span><span class="file-name">' + escapeHtml(file.name) + '</span>'
-                + '<span class="file-size">' + (file.size > 0 ? ' ' + formatSize(file.size) : '') + '</span></div>';
+            html += '<div class="file-item" data-path="' + escapeHtml(file.path) + '" data-level="' + level + '" style="padding-left:' + (level * 14 + 6) + 'px">'
+                + ICON.chevronSpacer + '<span class="file-icon">' + ICON.file + '</span><span class="file-name">' + escapeHtml(file.name) + '</span>'
+                + '<span class="file-size">' + (file.size > 0 ? formatSize(file.size) : '') + '</span></div>';
         });
         return html;
     }
@@ -198,7 +266,7 @@
                 if (next && next.classList.contains('folder-children')) {
                     const open = next.style.display !== 'none';
                     next.style.display = open ? 'none' : 'block';
-                    item.querySelector('.folder-icon').textContent = open ? '📁' : '📂';
+                    item.classList.toggle('open', !open);
                 }
             });
         });
@@ -306,38 +374,288 @@
     }
 
     // ---------- 浮窗交互 ----------
+    // 位置持久化：气泡、窗口各自的 left/top 存 localStorage。
+    const POS_KEY = 'gitweb_viewer_pos';
+    function loadPos() { try { return JSON.parse(localStorage.getItem(POS_KEY)) || {}; } catch (e) { return {}; } }
+    function savePos(patch) {
+        const cur = loadPos();
+        localStorage.setItem(POS_KEY, JSON.stringify(Object.assign(cur, patch)));
+    }
+
+    // 通用拖动：在 handle(s) 上按下时移动 el。handle 可为元素或数组。
+    // onMove 可选，用于实时存储位置 / 边缘吸附反馈；阈值过滤纯点击（移动小于 4px 视为点击）。
+    // opts.allowOverflow: 允许拖出视口（用于贴边半隐入）。onMove 收到 (x,y,edge)，edge 为最近边
+    // 'left'|'right'|'top'|'bottom' 及到该边距离 dist；onEnd 收到 (moved, x, y, edge, dist)。
+    function makeDraggable(el, handle, opts) {
+        opts = opts || {};
+        const handles = Array.isArray(handle) ? handle : [handle];
+        let dragging = false, startX = 0, startY = 0, ox = 0, oy = 0, moved = false;
+        let lastX = 0, lastY = 0, lastEdge = null, lastDist = Infinity;
+
+        const down = (clientX, clientY, e) => {
+            if (opts.ignoreOn && opts.ignoreOn(e)) return;
+            dragging = true; moved = false;
+            startX = clientX; startY = clientY;
+            const r = el.getBoundingClientRect();
+            ox = clientX - r.left; oy = clientY - r.top;
+            el.classList.add('dragging');
+            if (opts.onStart) opts.onStart();
+        };
+        const move = (clientX, clientY) => {
+            if (!dragging) return;
+            const dx = clientX - startX, dy = clientY - startY;
+            if (Math.abs(dx) > 4 || Math.abs(dy) > 4) moved = true;
+            const w = el.offsetWidth, h = el.offsetHeight;
+            let x = clientX - ox, y = clientY - oy;
+            if (opts.allowOverflow) {
+                // 允许部分超出视口（贴边半隐入），但仍保留至少一部分可见
+                x = Math.max(-w + 16, Math.min(x, window.innerWidth - 16));
+                y = Math.max(-h + 16, Math.min(y, window.innerHeight - 16));
+            } else {
+                x = Math.max(0, Math.min(x, window.innerWidth - w));
+                y = Math.max(0, Math.min(y, window.innerHeight - h));
+            }
+            el.style.left = x + 'px';
+            el.style.top = y + 'px';
+            el.style.right = 'auto'; el.style.bottom = 'auto';
+            // 计算到四边的最近距离（以元素中心为基准）
+            const cx = x + w / 2, cy = y + h / 2;
+            const edges = {
+                left: cx, right: window.innerWidth - cx,
+                top: cy, bottom: window.innerHeight - cy
+            };
+            let edge = 'left', dist = edges.left;
+            for (const k in edges) { if (edges[k] < dist) { dist = edges[k]; edge = k; } }
+            lastX = x; lastY = y; lastEdge = edge; lastDist = dist;
+            if (opts.onMove) opts.onMove(x, y, edge, dist);
+        };
+        const up = () => {
+            if (!dragging) return;
+            dragging = false;
+            el.classList.remove('dragging');
+            if (opts.onEnd) opts.onEnd(moved, lastX, lastY, lastEdge, lastDist);
+        };
+
+        handles.forEach(h => {
+            h.addEventListener('mousedown', e => { down(e.clientX, e.clientY, e); e.preventDefault(); });
+            h.addEventListener('touchstart', e => { const t = e.touches[0]; down(t.clientX, t.clientY, e); }, { passive: true });
+            h.style.touchAction = 'none';
+        });
+        document.addEventListener('mousemove', e => move(e.clientX, e.clientY));
+        document.addEventListener('mouseup', up);
+        document.addEventListener('touchmove', e => {
+            if (!dragging) return;
+            const t = e.touches[0]; move(t.clientX, t.clientY);
+            e.preventDefault();
+        }, { passive: false });
+        document.addEventListener('touchend', up);
+
+        return {
+            didMove: () => moved,
+            resetMoved: () => { moved = false; }
+        };
+    }
+
     function initFloatingTree() {
         const win = document.getElementById('floating-tree-window');
         const titlebar = document.getElementById('floating-tree-titlebar');
-        const bubble = document.getElementById('floating-bubble');
         const minimize = document.getElementById('minimize-btn');
-        const closeBtn = document.getElementById('close-btn');
-        if (!win || !bubble) return;
+        const minDock = document.getElementById('min-dock');
+        if (!win) return;
 
-        bubble.addEventListener('click', () => { win.classList.add('show'); bubble.classList.add('hidden'); });
-        minimize.addEventListener('click', () => { win.classList.remove('show'); bubble.classList.remove('hidden'); });
-        closeBtn.addEventListener('click', () => { win.classList.remove('show'); bubble.classList.remove('hidden'); });
+        const pos = loadPos();
+        const SNAP_DIST = 44;        // 离边小于该值即吸附（像素）
+        const DOCK_SIZE = 48;        // 迷你浮岛逻辑尺寸（与 CSS 一致；视觉缩放靠 transform）
+        const EASE = 'cubic-bezier(0.16, 1, 0.3, 1)';      // 苹果大形变缓动
+        const EASE_SNAP = 'cubic-bezier(0.32, 0.72, 0, 1)'; // 吸附滑入缓动
 
-        let dragging = false, ox = 0, oy = 0;
-        titlebar.addEventListener('mousedown', e => {
-            if (e.target.tagName === 'BUTTON') return;
-            dragging = true;
-            ox = e.clientX - win.offsetLeft;
-            oy = e.clientY - win.offsetTop;
-            titlebar.style.cursor = 'grabbing';
+        // 恢复窗口位置/尺寸
+        if (pos.winLeft != null) { win.style.left = pos.winLeft + 'px'; win.style.top = pos.winTop + 'px'; win.style.right = 'auto'; }
+        if (pos.winWidth != null) win.style.width = pos.winWidth + 'px';
+        if (pos.winHeight != null) win.style.height = pos.winHeight + 'px';
+
+        // ---- 窗口拖动（仅标题栏；展开态） ----
+        makeDraggable(win, titlebar, {
+            ignoreOn: e => e.target.closest('button') != null, // 点按钮不拖
+            onMove: (x, y) => savePos({ winLeft: x, winTop: y })
         });
-        document.addEventListener('mousemove', e => {
-            if (!dragging) return;
-            e.preventDefault();
-            const x = Math.max(0, Math.min(e.clientX - ox, window.innerWidth - win.offsetWidth));
-            const y = Math.max(0, Math.min(e.clientY - oy, window.innerHeight - win.offsetHeight));
-            win.style.left = x + 'px'; win.style.top = y + 'px'; win.style.right = 'auto';
+
+        // 监听窗口尺寸变化（resize 句柄）持久化
+        if (window.ResizeObserver) {
+            const ro = new ResizeObserver(entries => {
+                for (const en of entries) {
+                    if (!win.classList.contains('minimized')) {
+                        savePos({ winWidth: en.contentRect.width, winHeight: en.contentRect.height });
+                    }
+                }
+            });
+            ro.observe(win);
+        }
+
+        // ---- FLIP 形变：把"宽高变化"合成成一次 transform 动画，不 reflow、不闪烁。
+        // 记录 First(旧 rect) → 切到目标态读 Last(新 rect) → Invert(transform 把新态拉回旧视觉)
+        // → Play(下一帧 transform 过渡到目标态的 transform)。
+        function flipMorph(applyTarget, done) {
+            const first = win.getBoundingClientRect();
+            applyTarget();                       // 切 class / 设尺寸
+            // 尊重 prefers-reduced-motion：直接到位，不做 FLIP 动画
+            const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+            if (reduceMotion) { if (done) done(); return; }
+            // 强制布局，读 Last
+            const last = win.getBoundingClientRect();
+            const sx = first.width / last.width;
+            const sy = first.height / last.height;
+            const dx = first.left - last.left;
+            const dy = first.top - last.top;
+            if (!isFinite(sx) || !isFinite(sy) || (sx === 1 && sy === 1 && dx === 0 && dy === 0)) {
+                if (done) done(); return;
+            }
+            // 目标态自身的 transform（如吸附 scale）；FLIP 的位移/缩放叠加其上
+            const targetTx = getComputedStyle(win).transform;
+            const base = targetTx === 'none' ? '' : targetTx;
+            win.classList.add('morphing');
+            win.style.transition = 'none';
+            // Invert：在新位置上用 transform 还原到旧视觉
+            win.style.transform = base + ' translate(' + dx + 'px,' + dy + 'px) scale(' + sx + ',' + sy + ')';
+            // 强制 commit Invert 态
+            win.getBoundingClientRect();
+            // Play：下一帧切到目标 transform，带缓动
+            requestAnimationFrame(() => {
+                win.style.transition = 'transform 0.34s ' + EASE;
+                win.style.transform = base;      // 回到目标态
+            });
+            const finish = () => {
+                win.classList.remove('morphing');
+                win.style.transition = '';
+                win.style.transform = '';
+                if (done) done();
+            };
+            win.addEventListener('transitionend', function te(e) {
+                if (e.propertyName !== 'transform') return;
+                win.removeEventListener('transitionend', te);
+                finish();
+            });
+            // 兜底：超时也结束
+            setTimeout(finish, 400);
+        }
+
+        // ---- 缩为迷你浮岛（带 FLIP） ----
+        function toMiniIsland() {
+            // 首次最小化：把浮岛放到右下角附近（若没有保存位置）
+            if (pos.dockLeft == null) {
+                const x = window.innerWidth - 56, y = window.innerHeight - 56;
+                pos.dockLeft = x; pos.dockTop = y; pos.dockSnap = null;
+            }
+            flipMorph(() => {
+                applyDockPos(pos.dockLeft, pos.dockTop, pos.dockSnap);
+                win.classList.add('minimized');
+            });
+        }
+        function fromMiniIsland() {
+            flipMorph(() => {
+                win.classList.remove('minimized', 'snapped', 'snap-left', 'snap-right', 'snap-top', 'snap-bottom');
+            });
+        }
+        minimize.addEventListener('click', e => { e.stopPropagation(); toMiniIsland(); });
+
+        // 应用浮岛位置 + 吸附态 class（位置用 left/top，缩放靠 .snapped 的 transform）
+        function applyDockPos(x, y, snap) {
+            win.style.left = x + 'px'; win.style.top = y + 'px';
+            win.classList.toggle('snapped', !!snap);
+            win.classList.remove('snap-left', 'snap-right', 'snap-top', 'snap-bottom');
+            if (snap) win.classList.add('snap-' + snap);
+        }
+
+        // ---- 浮岛拖动：贴边吸附 + 半隐入 ----
+        // 拖动中 left/top 即时跟手（不在 transition 列表），transform(scale) 保留过渡 →
+        // 靠近/离开吸附区时缩小是柔和的，不跳变。松手若吸附则滑入半隐入位（带缓动）。
+        const dockDrag = makeDraggable(win, minDock, {
+            allowOverflow: true,
+            onMove: (x, y, edge, dist) => {
+                const willSnap = dist <= SNAP_DIST;
+                win.classList.toggle('snapped', willSnap);
+                win.classList.remove('snap-left', 'snap-right', 'snap-top', 'snap-bottom');
+                if (willSnap) win.classList.add('snap-' + edge);
+                win.style.left = x + 'px'; win.style.top = y + 'px';
+            },
+            onEnd: (moved, x, y, edge, dist) => {
+                if (!moved) return; // 纯点击交给 click 处理
+                const snapped = dist <= SNAP_DIST ? edge : null;
+                let fx = x, fy = y;
+                if (snapped) {
+                    // 半隐入：把逻辑 48 的中心压到边线（scale 0.75 围绕中心，视觉 36 即半隐入）
+                    const s = DOCK_SIZE;
+                    if (snapped === 'left') fx = -s / 2;
+                    if (snapped === 'right') fx = window.innerWidth - s / 2;
+                    if (snapped === 'top') fy = -s / 2;
+                    if (snapped === 'bottom') fy = window.innerHeight - s / 2;
+                }
+                // 松手滑入：给 left/top 一段短缓动，让"靠边→压边"是滑过去而非瞬移
+                const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+                win.style.transition = reduceMotion ? 'none' :
+                    'left 0.26s ' + EASE_SNAP + ', top 0.26s ' + EASE_SNAP
+                    + ', transform 0.26s ' + EASE_SNAP + ', box-shadow 0.28s ' + EASE
+                    + ', border-radius 0.28s ' + EASE + ', background 0.28s ' + EASE;
+                win.style.left = fx + 'px'; win.style.top = fy + 'px';
+                win.classList.toggle('snapped', !!snapped);
+                win.classList.remove('snap-left', 'snap-right', 'snap-top', 'snap-bottom');
+                if (snapped) win.classList.add('snap-' + snapped);
+                pos.dockLeft = fx; pos.dockTop = fy; pos.dockSnap = snapped;
+                savePos({ dockLeft: fx, dockTop: fy, dockSnap: snapped });
+                // 过渡结束后清掉行内 transition，恢复 CSS 默认（hover 等不受干扰）
+                const clear = () => { win.style.transition = ''; win.removeEventListener('transitionend', clear); };
+                win.addEventListener('transitionend', clear);
+                setTimeout(() => { win.style.transition = ''; }, 320);
+            }
         });
-        document.addEventListener('mouseup', () => { if (dragging) { dragging = false; titlebar.style.cursor = 'move'; } });
+
+        // 浮岛点击（未拖动）恢复展开
+        minDock.addEventListener('click', () => {
+            if (dockDrag.didMove()) { dockDrag.resetMoved(); return; }
+            fromMiniIsland();
+        });
 
         // 默认展开浮窗
         win.classList.add('show');
-        bubble.classList.add('hidden');
+    }
+
+    // ---------- 标题栏滚动自动隐藏（知乎同款：下滑藏、上滑显、贴顶常显） ----------
+    function initAutoHideHeader() {
+        const area = document.getElementById('content-area');
+        const header = document.querySelector('.viewer-header');
+        if (!area || !header) return;
+
+        let lastY = area.scrollTop;
+        let ticking = false;
+        const TOP_THRESHOLD = 8;   // 离顶小于此值视为贴顶，常显
+        const DELTA = 6;           // 滚动距离小于此值忽略，避免抖动
+
+        function update() {
+            const y = area.scrollTop;
+            const dy = y - lastY;
+            if (y <= TOP_THRESHOLD) {
+                header.classList.remove('head-hidden', 'head-scrolled');
+            } else {
+                header.classList.add('head-scrolled');
+                if (Math.abs(dy) >= DELTA) {
+                    // 下滑（dy>0）隐藏，上滑（dy<0）显示
+                    header.classList.toggle('head-hidden', dy > 0);
+                }
+            }
+            lastY = y;
+            ticking = false;
+        }
+        area.addEventListener('scroll', () => {
+            if (!ticking) { ticking = true; requestAnimationFrame(update); }
+        }, { passive: true });
+
+        // 鼠标移到顶部区域时临时唤回标题栏（便于点首页/删除）
+        area.addEventListener('mousemove', e => {
+            if (e.clientY < 60 && header.classList.contains('head-hidden')) {
+                header.classList.remove('head-hidden');
+                lastY = area.scrollTop; // 重置基线，避免立刻又被滚走
+            }
+        });
     }
 
     // ---------- 工具 ----------
@@ -351,6 +669,7 @@
     // ---------- 启动 ----------
     document.addEventListener('DOMContentLoaded', () => {
         initFloatingTree();
+        initAutoHideHeader();
         loadFileTree().then(autoOpenDefault);
     });
 })();
