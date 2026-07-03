@@ -9,12 +9,11 @@ import (
 )
 
 type Config struct {
-	BaseURL    string      `yaml:"base_url"`
-	Listen     string      `yaml:"listen"`
-	AdminToken string      `yaml:"admin_token"`
-	Cache      CacheConfig `yaml:"cache"`
-	Fetch      FetchConfig `yaml:"fetch"`
-	Sites      []SiteSpec  `yaml:"sites"`
+	BaseURL string      `yaml:"base_url"`
+	Listen  string      `yaml:"listen"`
+	Cache   CacheConfig `yaml:"cache"`
+	Fetch   FetchConfig `yaml:"fetch"`
+	Sites   []SiteSpec  `yaml:"sites"`
 }
 
 type CacheConfig struct {
@@ -101,7 +100,7 @@ func setDefaults(cfg *Config) {
 	}
 	for i := range cfg.Sites {
 		if cfg.Sites[i].Ref == "" {
-			cfg.Sites[i].Ref = "HEAD"
+			cfg.Sites[i].Ref = "main"
 		}
 	}
 }

@@ -1,0 +1,13 @@
+.git
+.github
+.gitignore
+*.md
+LICENSE
+gitweb
+gitweb.state.json
+*.log
+*.bak*
+*.tmp*
+config.yaml
+*.secret.yaml
+docs/

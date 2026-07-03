@@ -3,58 +3,93 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>gitweb</title>
+    <title>Gitweb</title>
     <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="/static/css/toast.css">
 </head>
 <body>
     <div class="hero">
         <div class="controls">
-            <button id="theme-toggle" class="icon-btn" title="Toggle theme">🌓</button>
-            <button id="lang-toggle" class="icon-btn" title="Switch language">EN</button>
+            <button id="theme-toggle" class="icon-btn" title="Toggle theme" aria-label="Toggle theme">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+            </button>
+            <button id="lang-toggle" class="icon-btn" title="Switch language" aria-label="Switch language">EN</button>
         </div>
-        
+
         <div class="hero-content">
-            <h1 class="logo">gitweb</h1>
+            <h1 class="logo">
+                <svg class="logo-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="6" r="2.5"/><path d="M6 8.5v7"/><path d="M6 12h6a3 3 0 0 0 3-3V8.5"/></svg>
+                Gitweb
+            </h1>
             <p class="tagline" data-en="Transform git repositories into browsable web pages" data-zh="将 Git 仓库转化为可浏览的网页">Transform git repositories into browsable web pages</p>
-            
+
             <div class="input-card">
                 <form id="register-form">
                     <div class="input-wrapper">
-                        <input type="text" 
-                               id="git_url" 
-                               name="git_url" 
+                        <input type="text"
+                               id="git_url"
+                               name="git_url"
                                class="main-input"
-                               placeholder="Paste your git repository URL here..."
-                               data-placeholder-en="Paste your git repository URL here..."
-                               data-placeholder-zh="粘贴 Git 仓库地址..."
+                               placeholder="https://github.com/fimreal/gitweb.git"
+                               data-placeholder-en="https://github.com/fimreal/gitweb.git"
+                               data-placeholder-zh="https://github.com/fimreal/gitweb.git"
                                required>
                         <button type="submit" class="submit-btn" data-en="Create" data-zh="创建">Create</button>
                     </div>
-                    
+
                     <details class="advanced-options">
-                        <summary data-en="⚙ Advanced" data-zh="⚙ 高级选项">⚙ Advanced</summary>
+                        <summary title="Advanced" data-en-title="Advanced" data-zh-title="高级选项">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+                        </summary>
                         <div class="compact-grid">
                             <input type="text" id="pathid" name="pathid" placeholder="Path ID (auto)" class="compact-input">
                             <input type="text" id="ref" name="ref" placeholder="Branch" value="main" class="compact-input">
-                            <select id="auth_type" name="auth_type" class="compact-input">
-                                <option value="">No auth</option>
-                                <option value="token">Token</option>
-                                <option value="basic">User/Pass</option>
-                            </select>
-                            <input type="password" id="token" name="token" placeholder="Token" class="compact-input" style="display:none;">
-                            <input type="text" id="username" name="username" placeholder="Username" class="compact-input" style="display:none;">
-                            <input type="password" id="password" name="password" placeholder="Password" class="compact-input" style="display:none;">
                         </div>
+                        <p class="auth-hint" data-en="Private repo? Open it and enter credentials when prompted." data-zh="私有仓库？打开后按提示输入凭据。">Private repo? Open it and enter credentials when prompted.</p>
                     </details>
                 </form>
-                
+
                 <div id="result" style="display:none;"></div>
             </div>
-            
+
+            <div id="sites-title" class="sites-section-title" style="display:none;" data-en="Your sites" data-zh="你的站点">Your sites</div>
             <div id="sites-list" class="sites-grid" style="display:none;"></div>
         </div>
     </div>
-    
+
+    <!-- 右下角入口：点开站点列表浮层 -->
+    <button class="sites-entry-btn" id="sites-entry-btn" title="浏览站点" aria-label="浏览站点">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+    </button>
+
+    <!-- 站点列表浮层：搜索 + 翻页 + 卡片 -->
+    <div class="sites-overlay" id="sites-overlay" style="display:none;">
+        <div class="sites-overlay-backdrop" id="sites-overlay-backdrop"></div>
+        <div class="sites-panel" id="sites-panel">
+            <div class="sites-panel-header">
+                <h2 data-en="Sites" data-zh="站点列表">Sites</h2>
+                <button class="floating-tree-btn close" id="sites-panel-close" title="关闭" aria-label="关闭">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+                </button>
+            </div>
+            <div class="sites-panel-search">
+                <input type="text" id="sites-filter" class="main-input"
+                       placeholder="Search..."
+                       data-placeholder-en="Search..."
+                       data-placeholder-zh="搜索...">
+            </div>
+            <div class="sites-panel-list" id="sites-panel-list"></div>
+            <div class="sites-panel-empty" id="sites-panel-empty" style="display:none;"
+                 data-en="No sites match your search." data-zh="没有匹配的站点。">No sites match your search.</div>
+            <div class="sites-panel-pager" id="sites-panel-pager" style="display:none;">
+                <button class="pager-btn" id="pager-prev" disabled data-en="← Prev" data-zh="← 上页">← Prev</button>
+                <span class="pager-info" id="pager-info">1 / 1</span>
+                <button class="pager-btn" id="pager-next" disabled data-en="Next →" data-zh="下页 →">Next →</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/toast.js"></script>
     <script src="/static/js/app.js"></script>
 </body>
 </html>
