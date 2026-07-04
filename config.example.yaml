@@ -24,6 +24,7 @@ sites:
   - git_url: https://github.com/fimreal/gitweb.git
     pathid: gitweb
     ref: main
+    # hidden: true   # 不进公开 /api/sites 列表；直链 /{pathid}/ 仍可访问。默认 false。
     # auth is only for preloaded private repos. For repos registered at runtime,
     # enter credentials in the browser when the repo is opened.
     # auth:

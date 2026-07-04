@@ -108,7 +108,7 @@ func main() {
 
 		providerType := providerMgr.IdentifyProvider(siteSpec.GitURL)
 
-		site, err := reg.Register(siteSpec.GitURL, siteSpec.PathID, siteSpec.Ref, providerType, auth)
+		site, err := reg.Register(siteSpec.GitURL, siteSpec.PathID, siteSpec.Ref, providerType, auth, siteSpec.Hidden)
 		if err != nil {
 			log.Printf("Warning: failed to register site %s: %v", siteSpec.GitURL, err)
 		} else {

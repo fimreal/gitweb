@@ -39,13 +39,28 @@
 
                     <details class="advanced-options">
                         <summary title="Advanced" data-en-title="Advanced" data-zh-title="高级选项">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+                            <svg class="ao-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+                            <span class="ao-label" data-en="Advanced" data-zh="高级选项">Advanced</span>
                         </summary>
-                        <div class="compact-grid">
-                            <input type="text" id="pathid" name="pathid" placeholder="Path ID (auto)" class="compact-input">
-                            <input type="text" id="ref" name="ref" placeholder="Branch" value="main" class="compact-input">
+                        <div class="advanced-options-body">
+                          <div class="ao-inner-wrap">
+                            <div class="compact-grid">
+                                <input type="text" id="pathid" name="pathid" placeholder="Path ID (auto)" class="compact-input">
+                                <input type="text" id="ref" name="ref" placeholder="Branch" value="main" class="compact-input">
+                            </div>
+                            <label class="visibility-toggle" for="hidden-toggle">
+                                <span class="vt-text">
+                                    <span class="vt-title" data-en="Show in site list" data-zh="在站点列表显示">Show in site list</span>
+                                    <span class="vt-hint" data-en="Off = only people with the link can open it" data-zh="关闭后仅知道链接者可访问">Off = only people with the link can open it</span>
+                                </span>
+                                <span class="switch">
+                                    <input type="checkbox" id="hidden-toggle" name="hidden" value="1" checked>
+                                    <span class="switch-track"><span class="switch-thumb"></span></span>
+                                </span>
+                            </label>
+                            <p class="auth-hint" data-en="Private repo? Open it and click 🔑 凭据 to enter credentials." data-zh="私有仓库？打开后点 🔑 凭据 输入。">Private repo? Open it and click 🔑 凭据 to enter credentials.</p>
+                          </div>
                         </div>
-                        <p class="auth-hint" data-en="Private repo? Open it and click 🔑 凭据 (or enter when prompted) to authenticate." data-zh="私有仓库？打开后点 🔑 凭据 输入，或在报错时按提示输入。">Private repo? Open it and click 🔑 凭据 (or enter when prompted) to authenticate.</p>
                     </details>
                 </form>
 

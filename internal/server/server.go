@@ -92,6 +92,7 @@ func (s *Server) handleRegisterSite(c *gin.Context) {
 		GitURL string `json:"git_url"`
 		PathID string `json:"pathid"`
 		Ref    string `json:"ref"`
+		Hidden bool   `json:"hidden"`
 		// 注：注册不再带凭据。私有仓库凭据在访问时运行时输入，存浏览器 sessionStorage。
 	}
 
@@ -124,7 +125,7 @@ func (s *Server) handleRegisterSite(c *gin.Context) {
 		}
 	}
 
-	site, err := s.registry.Register(gitURL, req.PathID, ref, providerType, nil)
+	site, err := s.registry.Register(gitURL, req.PathID, ref, providerType, nil, req.Hidden)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -137,7 +138,7 @@ func (s *Server) handleRegisterSite(c *gin.Context) {
 }
 
 func (s *Server) handleListSites(c *gin.Context) {
-	sites := s.registry.List()
+	sites := s.registry.ListPublic()
 	result := make([]gin.H, len(sites))
 	for i, site := range sites {
 		result[i] = gin.H{
