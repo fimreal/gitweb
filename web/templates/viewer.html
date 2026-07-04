@@ -82,10 +82,22 @@
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="7.5" cy="15.5" r="3.5"/><path d="M10.5 15V7.5a2 2 0 0 1 2-2H18"/><path d="M15 3.5l3 2-3 2"/></svg>
                             <span class="si-label" data-en="Credentials" data-zh="凭据">凭据</span>
                         </button>
-                        <button class="settings-item" id="hidden-files-btn" role="menuitem" type="button">
-                            <svg class="si-icon-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>
-                            <svg class="si-icon-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.88 9.88a3 3 0 0 0 4.24 4.24"/><path d="M6.06 6.06a10.94 10.94 0 0 0-4.06 5.94 10.94 10.94 0 0 0 11.94 6.94"/><path d="M3 3l18 18"/></svg>
-                            <span class="si-label" data-en="Hidden files" data-zh="隐藏文件">隐藏文件</span>
+                        <div class="settings-divider"></div>
+                        <button class="settings-item" id="hidden-files-btn" role="menuitem" type="button" aria-pressed="false">
+                            <!-- 图标=当前状态：隐藏中显示划眼（si-icon-on，未 .checked 时显示），
+                                 显示中显示睁眼（si-icon-off，.checked 时显示）。与 VS Code 资源管理器一致。 -->
+                            <svg class="si-icon-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.88 9.88a3 3 0 0 0 4.24 4.24"/><path d="M6.06 6.06a10.94 10.94 0 0 0-4.06 5.94 10.94 10.94 0 0 0 11.94 6.94"/><path d="M3 3l18 18"/></svg>
+                            <svg class="si-icon-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>
+                            <!-- 文案=点击目标（与主题切换同款）：默认隐藏中 → 「显示隐藏文件」 -->
+                            <span class="si-label" data-en="Show hidden files" data-zh="显示隐藏文件">显示隐藏文件</span>
+                        </button>
+                        <button class="settings-item" id="line-numbers-btn" role="menuitem" type="button" aria-pressed="false">
+                            <!-- 图标=当前状态：不显示行号时为「无序列表」（si-icon-on，未 .checked 时显示），
+                                 显示行号时为「有序列表」（si-icon-off，.checked 时显示）。 -->
+                            <svg class="si-icon-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="9" y1="6" x2="20" y2="6"/><line x1="9" y1="12" x2="20" y2="12"/><line x1="9" y1="18" x2="20" y2="18"/><circle cx="4.5" cy="6" r="1"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="18" r="1"/></svg>
+                            <svg class="si-icon-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="9" y1="6" x2="20" y2="6"/><line x1="9" y1="12" x2="20" y2="12"/><line x1="9" y1="18" x2="20" y2="18"/><text x="3" y="8" font-size="7" stroke="none" fill="currentColor">1</text><text x="3" y="14" font-size="7" stroke="none" fill="currentColor">2</text><text x="3" y="20" font-size="7" stroke="none" fill="currentColor">3</text></svg>
+                            <!-- 文案=点击目标：默认不显示行号 → 「显示行号」 -->
+                            <span class="si-label" data-en="Show line numbers" data-zh="显示行号">显示行号</span>
                         </button>
                         <div class="settings-divider"></div>
                         <button class="settings-item" id="site-info-btn" role="menuitem" type="button">
@@ -257,7 +269,7 @@
         if (trigger) trigger.addEventListener('click', toggleSettings);
         // 凭据/删除点击后自动关菜单；主题项自己调 closeSettings
         document.querySelectorAll('.settings-item').forEach(b => {
-            if (b.id !== 'theme-toggle-viewer' && b.id !== 'hidden-files-btn') b.addEventListener('click', closeSettings);
+            if (b.id !== 'theme-toggle-viewer' && b.id !== 'hidden-files-btn' && b.id !== 'line-numbers-btn') b.addEventListener('click', closeSettings);
         });
         document.addEventListener('click', (e) => {
             const m = document.getElementById('settings-menu');
@@ -270,9 +282,10 @@
     let showHidden = false;
 
     function isHiddenFile(path) {
-        // 路径最后一段以 . 开头视为隐藏文件（如 .gitignore / .env / .eslintrc）
-        const seg = path.split('/').pop();
-        return seg.length > 0 && seg.charAt(0) === '.';
+        // 路径任意一段以 . 开头即视为隐藏：既覆盖 .gitignore / .env 这类隐藏文件，
+        // 也覆盖 .github/、.vscode/ 这类隐藏目录及其下的全部内容（避免目录节点漏过过滤后，
+        // 连带子文件一起显示在树里）。
+        return path.split('/').some(seg => seg.length > 0 && seg.charAt(0) === '.');
     }
 
     function visibleFiles() {
@@ -285,6 +298,17 @@
         if (!btn) return;
         btn.classList.toggle('checked', showHidden);
         btn.setAttribute('aria-pressed', showHidden ? 'true' : 'false');
+        // 文案随状态切换（与主题切换同款「显示将要切换到的目标」）：
+        //   隐藏中(showHidden=false) → 「显示隐藏文件」
+        //   显示中(showHidden=true)  → 「隐藏文件」
+        const label = btn.querySelector('.si-label');
+        if (label) {
+            const en = showHidden ? 'Hide hidden files' : 'Show hidden files';
+            const zh = showHidden ? '隐藏文件' : '显示隐藏文件';
+            label.textContent = currentLang === 'zh' ? zh : en;
+            label.setAttribute('data-en', en);
+            label.setAttribute('data-zh', zh);
+        }
     }
 
     function initHiddenFilesToggle() {
@@ -295,6 +319,66 @@
             showHidden = !showHidden;
             updateHiddenFilesBtn();
             renderTree(visibleFiles());
+            closeSettings();
+        });
+    }
+
+    // ---------- 行号：默认显示，按需关闭；不持久化 ----------
+    // 仅作用于 <pre><code>（纯文本/代码），markdown 渲染结果（.markdown-body）忽略。
+    let showLineNumbers = true;
+
+    function updateLineNumbersBtn() {
+        const btn = document.getElementById('line-numbers-btn');
+        if (!btn) return;
+        btn.classList.toggle('checked', showLineNumbers);
+        btn.setAttribute('aria-pressed', showLineNumbers ? 'true' : 'false');
+        // 文案=点击目标：显示中 → 「隐藏行号」、隐藏中 → 「显示行号」
+        const label = btn.querySelector('.si-label');
+        if (label) {
+            const en = showLineNumbers ? 'Hide line numbers' : 'Show line numbers';
+            const zh = showLineNumbers ? '隐藏行号' : '显示行号';
+            label.textContent = currentLang === 'zh' ? zh : en;
+            label.setAttribute('data-en', en);
+            label.setAttribute('data-zh', zh);
+        }
+    }
+
+    function applyLineNumbers() {
+        // 对每个 code-container 的 <pre><code> 套一层行号栅格（CSS 实现，不侵入内容）
+        document.querySelectorAll('.code-container .code-content').forEach(content => {
+            const pre = content.querySelector('pre');
+            const code = pre && pre.querySelector('code');
+            if (!pre || !code) return;
+            if (showLineNumbers) {
+                if (content.parentElement.classList.contains('has-line-numbers')) return; // 已套过
+                content.parentElement.classList.add('has-line-numbers');
+                const gutter = document.createElement('div');
+                gutter.className = 'line-gutter';
+                // 按当前 code 的实际行数生成行号；用 <br> 不靠谱，按 \n 切。
+                const lineCount = code.textContent.split('\n').length;
+                // 末尾若以 \n 结尾，textContent 会多算一个空行，与 <pre> 渲染一致，不扣减。
+                let nums = '';
+                for (let i = 1; i <= lineCount; i++) nums += (i) + '\n';
+                gutter.textContent = nums;
+                content.classList.add('with-gutter');
+                content.insertBefore(gutter, pre);
+            } else {
+                const gutter = content.querySelector('.line-gutter');
+                if (gutter) gutter.remove();
+                content.classList.remove('with-gutter');
+                content.parentElement.classList.remove('has-line-numbers');
+            }
+        });
+    }
+
+    function initLineNumbersToggle() {
+        const btn = document.getElementById('line-numbers-btn');
+        if (!btn) return;
+        updateLineNumbersBtn();
+        btn.addEventListener('click', () => {
+            showLineNumbers = !showLineNumbers;
+            updateLineNumbersBtn();
+            applyLineNumbers();
             closeSettings();
         });
     }
@@ -379,6 +463,7 @@
     applyLang(currentLang);
     initSettings();
     initHiddenFilesToggle();
+    initLineNumbersToggle();
     initRefSwitch();
     initSiteInfo();
 
@@ -662,6 +747,7 @@
             const maxLines = 1000;
             if (lines.length <= maxLines) {
                 area.innerHTML = '<div class="code-container"><div class="code-content"><pre><code>' + raw + '</code></pre></div></div>';
+                applyLineNumbers();
                 return;
             }
             let page = 0;
@@ -686,6 +772,7 @@
                 container.appendChild(pager);
                 area.innerHTML = '';
                 area.appendChild(container);
+                applyLineNumbers(); // 分页切页后重挂行号
                 area.scrollTop = 0;
             }
             renderPage(page);

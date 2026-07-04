@@ -725,6 +725,42 @@ body {
     word-wrap: break-word;
 }
 
+/* ---------- 行号栅格 ----------
+   思路：把 .line-gutter 与 <pre> 并排放进 .code-content，
+   gutter 用 monospace + 与 pre 相同 line-height，行号自然对齐；
+   pre 横向滚动时 gutter 不随之滚动（粘在左侧）。 */
+.code-content.with-gutter {
+    display: flex;
+    align-items: flex-start;
+    padding: 16px 16px 16px 0; /* 左 padding 移到 gutter 上 */
+}
+.code-content.with-gutter .line-gutter {
+    flex-shrink: 0;
+    position: sticky;
+    left: 0;
+    padding: 0 12px 0 16px;
+    text-align: right;
+    color: var(--secondary);
+    opacity: 0.55;
+    font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+    font-size: 13px;
+    line-height: 1.6;
+    white-space: pre;
+    user-select: none;
+    border-right: 1px solid var(--border);
+    margin-right: 12px;
+    background: var(--code-bg);
+}
+.code-content.with-gutter pre {
+    flex: 1;
+    min-width: 0;
+}
+/* 行号随主题加深一点 */
+[data-theme="dark"] .code-content.with-gutter .line-gutter,
+:root:not([data-theme="light"]) .code-content.with-gutter .line-gutter {
+    opacity: 0.5;
+}
+
 /* markdown 渲染结果 */
 .markdown-body { max-width: 820px; line-height: 1.7; }
 .markdown-body h1, .markdown-body h2, .markdown-body h3 { margin: 1.4em 0 0.6em; }
