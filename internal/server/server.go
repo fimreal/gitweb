@@ -108,7 +108,13 @@ func (s *Server) handleRegisterSite(c *gin.Context) {
 
 	providerType := s.provider.IdentifyProvider(req.GitURL)
 	if providerType == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported git provider"})
+		// 自托管实例探测失败常见原因：域名解析到私网 IP 被 SSRF 拦截。
+		// 给一个更可操作的提示，而不是泛泛的 "unsupported"。
+		if hint := s.provider.SsrfHint(req.GitURL); hint != "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported git provider: " + hint})
+		} else {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported git provider"})
+		}
 		return
 	}
 

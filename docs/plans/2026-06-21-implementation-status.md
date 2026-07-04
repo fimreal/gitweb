@@ -92,5 +92,5 @@ GET    /:pathid/*filepath            viewer 页面（Views+1）/ 文件内容
 go build -o gitweb ./cmd/gitweb
 ./gitweb                      # 默认 :8080
 ./gitweb --config config.yaml
-./gitweb --http-proxy http://192.168.10.1:54122
+./gitweb --http-proxy http://10.0.0.1:7890
 ```

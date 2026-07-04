@@ -133,9 +133,16 @@
             const data = await response.json();
             if (!data.sites || data.sites.length === 0) return;
 
+            // 首页内联只展示最近 3 个公开站点（按创建时间降序），
+            // 完整列表走右下角浮层。
+            const recent = data.sites
+                .slice()
+                .sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''))
+                .slice(0, 3);
+
             const sitesGrid = document.getElementById('sites-list');
             const sitesTitle = document.getElementById('sites-title');
-            sitesGrid.innerHTML = data.sites.map(site => `
+            sitesGrid.innerHTML = recent.map(site => `
                 <a class="site-card" href="/${site.pathid}/" target="_blank" rel="noopener">
                     <div class="site-card-head">
                         <span class="pathid">${site.pathid}</span>
@@ -245,6 +252,26 @@
         entryBtn.addEventListener('click', open);
         backdrop.addEventListener('click', close);
         closeBtn.addEventListener('click', close);
+    })();
+
+    // =========================================================
+    //  底部应用简介：箭头点击展开/收起
+    // =========================================================
+    (function initAbout() {
+        const toggle = document.getElementById('about-toggle');
+        const panel = document.getElementById('about-panel');
+        if (!toggle || !panel) return;
+
+        toggle.addEventListener('click', () => {
+            const open = toggle.getAttribute('aria-expanded') === 'true';
+            if (open) {
+                panel.hidden = true;
+                toggle.setAttribute('aria-expanded', 'false');
+            } else {
+                panel.hidden = false;
+                toggle.setAttribute('aria-expanded', 'true');
+            }
+        });
     })();
 
     document.addEventListener('DOMContentLoaded', () => {
