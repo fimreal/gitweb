@@ -56,6 +56,7 @@ sites:
   - git_url: https://github.com/username/repo
     pathid: mysite
     ref: main
+    hidden: false  # true = 不进公开站点列表，仅靠直链 /mysite/ 访问
     # auth is optional and only for preloaded private repos. For runtime-registered
     # repos, credentials are entered in the browser when the repo is opened.
     auth:

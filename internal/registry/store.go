@@ -18,7 +18,8 @@ type stateRecord struct {
 	Ref       string    `json:"ref"`
 	Provider  string    `json:"provider"`
 	CreatedAt time.Time `json:"created_at"`
-	Views     int64     `json:"views,omitempty"` // 旧 state 文件无此字段时反序列化为 0，向后兼容
+	Views     int64     `json:"views,omitempty"`  // 旧 state 文件无此字段时反序列化为 0，向后兼容
+	Hidden    bool      `json:"hidden,omitempty"` // 旧 state 文件无此字段时反序列化为 false（公开），向后兼容
 }
 
 type stateFile struct {

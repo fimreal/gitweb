@@ -35,6 +35,7 @@ type SiteSpec struct {
 	GitURL  string    `yaml:"git_url"`
 	PathID  string    `yaml:"pathid"`
 	Ref     string    `yaml:"ref"`
+	Hidden  bool      `yaml:"hidden"`
 	Auth    *AuthSpec `yaml:"auth,omitempty"`
 }
 

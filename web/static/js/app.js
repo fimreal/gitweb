@@ -76,10 +76,13 @@
 
             const formData = new FormData(form);
             const pathidInput = formData.get('pathid');
+            // 复选框勾选 = 公开显示（hidden=false）；未勾选 = 隐藏（hidden=true）
+            const showInList = document.getElementById('hidden-toggle').checked;
             const payload = {
                 git_url: formData.get('git_url'),
                 pathid: pathidInput && pathidInput.trim() !== '' ? pathidInput.trim() : undefined,
-                ref: formData.get('ref') || 'main'
+                ref: formData.get('ref') || 'main',
+                hidden: !showInList
             };
 
             try {

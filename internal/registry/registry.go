@@ -31,6 +31,7 @@ type Site struct {
 	DefaultDoc string
 	CreatedAt  time.Time
 	Views      int64 // 站点被打开（viewer 页面）的次数；内存累加，防抖落盘
+	Hidden     bool // 仅创建时可设。true=不进公开 /api/sites 列表，直链 /{pathid}/ 仍可访问
 }
 
 type Registry struct {
@@ -67,6 +68,7 @@ func (r *Registry) EnablePersistence(path string) error {
 			Provider:  rec.Provider,
 			CreatedAt: rec.CreatedAt,
 			Views:     rec.Views,
+			Hidden:    rec.Hidden,
 		}
 	}
 	r.store = st
@@ -144,6 +146,7 @@ func (r *Registry) snapshot() []stateRecord {
 			Provider:  s.Provider,
 			CreatedAt: s.CreatedAt,
 			Views:     s.Views,
+			Hidden:    s.Hidden,
 		})
 	}
 	return records
@@ -166,7 +169,7 @@ var reservedPrefixes = map[string]bool{
 	"api": true, "static": true, "healthz": true,
 }
 
-func (r *Registry) Register(gitURL, pathID, ref string, providerType string, auth *Auth) (*Site, error) {
+func (r *Registry) Register(gitURL, pathID, ref string, providerType string, auth *Auth, hidden bool) (*Site, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -193,6 +196,7 @@ func (r *Registry) Register(gitURL, pathID, ref string, providerType string, aut
 		Provider:  providerType,
 		Auth:      auth,
 		CreatedAt: time.Now(),
+		Hidden:    hidden,
 	}
 
 	r.sites[pathID] = site
@@ -227,6 +231,21 @@ func (r *Registry) List() []*Site {
 	sites := make([]*Site, 0, len(r.sites))
 	for _, s := range r.sites {
 		sites = append(sites, s)
+	}
+	return sites
+}
+
+// ListPublic 返回未标记为隐藏的站点，用于公开的 /api/sites 列表。
+// 隐藏站点仍可用 Get + 直链访问，只是不进公开列表。
+func (r *Registry) ListPublic() []*Site {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	sites := make([]*Site, 0, len(r.sites))
+	for _, s := range r.sites {
+		if !s.Hidden {
+			sites = append(sites, s)
+		}
 	}
 	return sites
 }
