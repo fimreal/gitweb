@@ -268,33 +268,74 @@ body {
 }
 .home-link:hover { background: var(--accent-soft); text-decoration: none; }
 
-.delete-btn {
-    background: transparent;
+/* 设置下拉菜单 */
+.settings-menu { position: relative; }
+.settings-trigger {
+    width: 34px; height: 34px;
+    display: flex; align-items: center; justify-content: center;
     border: 1px solid var(--border);
+    background: transparent;
     color: var(--secondary);
-    padding: 6px 12px;
     border-radius: var(--r-sm);
     cursor: pointer;
-    font-size: 13px;
-    transition: all 0.18s ease;
+    transition: color 0.18s ease, border-color 0.18s ease, background 0.18s ease;
 }
-.delete-btn:hover { color: #dc2626; border-color: #dc2626; background: rgba(220, 38, 38, 0.06); }
-[data-theme="dark"] .delete-btn:hover, :root:not([data-theme="light"]) .delete-btn:hover {
-    color: #f87171; border-color: #f87171; background: rgba(248, 113, 113, 0.08);
-}
+.settings-trigger svg { width: 18px; height: 18px; }
+.settings-trigger:hover { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.settings-trigger[aria-expanded="true"] { color: var(--accent); border-color: var(--accent); }
 
-/* 凭据按钮：与 delete-btn 同形，hover 走 accent 色 */
-.auth-btn {
-    background: transparent;
+.settings-dropdown {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    min-width: 168px;
+    background: var(--bg);
     border: 1px solid var(--border);
-    color: var(--secondary);
-    padding: 6px 12px;
+    border-radius: var(--r-md);
+    box-shadow: var(--shadow-xl);
+    padding: 6px;
+    opacity: 0;
+    transform: translateY(-6px) scale(0.97);
+    transform-origin: top right;
+    pointer-events: none;
+    transition: opacity 0.18s var(--ease-apple), transform 0.18s var(--ease-apple);
+    z-index: 60;
+}
+.settings-menu.open .settings-dropdown {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    pointer-events: auto;
+}
+.settings-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 8px 10px;
+    border: none;
+    background: transparent;
+    color: var(--fg);
     border-radius: var(--r-sm);
     cursor: pointer;
     font-size: 13px;
-    transition: all 0.18s ease;
+    text-align: left;
+    transition: background 0.15s ease, color 0.15s ease;
 }
-.auth-btn:hover { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.settings-item svg { width: 16px; height: 16px; color: var(--secondary); flex-shrink: 0; }
+.settings-item:hover { background: var(--accent-soft); }
+.settings-item:hover svg { color: var(--accent); }
+/* 切换项：两个图标按 .checked 状态显隐 */
+.settings-item .si-icon-off { display: none; }
+.settings-item.checked .si-icon-on { display: none; }
+.settings-item.checked .si-icon-off { display: block; }
+.settings-item.checked svg { color: var(--accent); }
+.settings-item.danger { color: #dc2626; }
+.settings-item.danger svg { color: #dc2626; }
+.settings-item.danger:hover { background: rgba(220, 38, 38, 0.08); }
+[data-theme="dark"] .settings-item.danger, :root:not([data-theme="light"]) .settings-item.danger { color: #f87171; }
+[data-theme="dark"] .settings-item.danger svg, :root:not([data-theme="light"]) .settings-item.danger svg { color: #f87171; }
+[data-theme="dark"] .settings-item.danger:hover, :root:not([data-theme="light"]) .settings-item.danger:hover { background: rgba(248, 113, 113, 0.10); }
+.settings-divider { height: 1px; background: var(--border); margin: 5px 4px; }
 
 .content-area {
     flex: 1;

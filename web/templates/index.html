@@ -67,9 +67,29 @@
                 <div id="result" style="display:none;"></div>
             </div>
 
-            <div id="sites-title" class="sites-section-title" style="display:none;" data-en="Your sites" data-zh="你的站点">Your sites</div>
+            <div id="sites-title" class="sites-section-title" style="display:none;" data-en="Recent" data-zh="最近">Recent</div>
             <div id="sites-list" class="sites-grid" style="display:none;"></div>
         </div>
+    </div>
+
+    <!-- 页面底部：简介展开区 + copyright -->
+    <div class="footer-area" id="footer-area">
+        <section class="about-panel" id="about-panel" hidden>
+            <div class="about-inner">
+                <h2 data-en="What is gitweb" data-zh="gitweb 是什么">gitweb 是什么</h2>
+                <p data-en="Turn any Git repository into a web page you can read in the browser — no clone, no build. Good for notes, docs, wikis, or anything you already keep in git." data-zh="把任意 Git 仓库变成网页，直接在浏览器里看——不用克隆、不用构建。适合用 git 管理的笔记、文档、wiki 或任何内容。">把任意 Git 仓库变成网页，直接在浏览器里看——不用克隆、不用构建。适合用 git 管理的笔记、文档、wiki 或任何内容。</p>
+                <ol class="about-steps">
+                    <li><span data-en="Paste a Git URL (GitHub / GitLab / Gitea) and click Create." data-zh="粘贴一个 Git 仓库地址（GitHub / GitLab / Gitea），点创建。">粘贴一个 Git 仓库地址（GitHub / GitLab / Gitea），点创建。</span></li>
+                    <li><span data-en="Open the generated link — your files render as a readable site." data-zh="打开生成的链接，仓库里的文件就渲染成可浏览的网页。">打开生成的链接，仓库里的文件就渲染成可浏览的网页。</span></li>
+                    <li><span data-en="Use the floating file tree to jump between files. Markdown and code are rendered nicely." data-zh="用浮动的文件树在文件间跳转，Markdown 和代码都会自动渲染。">用浮动的文件树在文件间跳转，Markdown 和代码都会自动渲染。</span></li>
+                    <li><span data-en="Private repo? Open it and click 🔑 凭据 to enter a token or username + password." data-zh="私有仓库？打开后点 🔑 凭据 输入 Token 或账号密码。">私有仓库？打开后点 🔑 凭据 输入 Token 或账号密码。</span></li>
+                </ol>
+            </div>
+        </section>
+        <button class="about-toggle" id="about-toggle" aria-expanded="false" aria-controls="about-panel" title="关于 gitweb" data-en-title="About gitweb" data-zh-title="关于 gitweb">
+            <svg class="about-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
+        <footer class="copyright">© 2026 gitweb · MPL-2.0</footer>
     </div>
 
     <!-- 右下角入口：点开站点列表浮层 -->

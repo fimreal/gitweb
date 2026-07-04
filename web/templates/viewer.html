@@ -66,12 +66,39 @@
             </div>
             <div class="content-header-actions">
                 <a href="/" class="home-link">← 首页</a>
-                <button class="auth-btn" id="auth-site-btn" title="输入/更换仓库凭据">🔑 凭据</button>
-                <button class="delete-btn" id="delete-site-btn" title="删除此站点">🗑 删除</button>
+                <div class="settings-menu" id="settings-menu">
+                    <button class="settings-trigger" id="settings-trigger" title="设置" aria-haspopup="menu" aria-expanded="false" aria-label="设置">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                    </button>
+                    <div class="settings-dropdown" id="settings-dropdown" role="menu">
+                        <button class="settings-item" id="theme-toggle-viewer" role="menuitem" type="button">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+                            <span class="si-label" data-en="Light" data-zh="亮色">亮色</span>
+                        </button>
+                        <button class="settings-item" id="ref-switch-btn" role="menuitem" type="button">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="6" r="2.5"/><path d="M6 8.5v7"/><path d="M6 12h6a3 3 0 0 0 3-3V8.5"/></svg>
+                            <span class="si-label" data-en="Switch ref" data-zh="切换 ref">切换 ref</span>
+                        </button>
+                        <button class="settings-item" id="auth-site-btn" role="menuitem" type="button">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="7.5" cy="15.5" r="3.5"/><path d="M10.5 15V7.5a2 2 0 0 1 2-2H18"/><path d="M15 3.5l3 2-3 2"/></svg>
+                            <span class="si-label" data-en="Credentials" data-zh="凭据">凭据</span>
+                        </button>
+                        <button class="settings-item" id="hidden-files-btn" role="menuitem" type="button">
+                            <svg class="si-icon-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>
+                            <svg class="si-icon-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.88 9.88a3 3 0 0 0 4.24 4.24"/><path d="M6.06 6.06a10.94 10.94 0 0 0-4.06 5.94 10.94 10.94 0 0 0 11.94 6.94"/><path d="M3 3l18 18"/></svg>
+                            <span class="si-label" data-en="Hidden files" data-zh="隐藏文件">隐藏文件</span>
+                        </button>
+                        <div class="settings-divider"></div>
+                        <button class="settings-item danger" id="delete-site-btn" role="menuitem" type="button">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+                            <span class="si-label" data-en="Delete site" data-zh="删除站点">删除站点</span>
+                        </button>
+                    </div>
+                </div>
             </div>
         </div>
         <div class="content-area" id="content-area">
-            <div class="welcome">选择右侧文件目录中的文件查看内容</div>
+            <div class="welcome" data-en="Click the folder icon to browse files" data-zh="点右上角文件夹图标浏览文件">点右上角文件夹图标浏览文件</div>
         </div>
     </main>
 
@@ -108,6 +135,21 @@
         </div>
     </div>
 
+    <!-- 切换 ref 弹窗：输入任意分支 / tag / commit SHA -->
+    <div class="auth-modal" id="ref-modal" style="display:none;">
+        <div class="auth-modal-card">
+            <h2 data-en="Switch ref" data-zh="切换 ref">切换 ref</h2>
+            <p data-en="Enter a branch, tag, or commit SHA to view. The change is temporary and not saved to the site." data-zh="输入分支、tag 或 commit SHA 来切换查看。临时切换，不会写入站点配置。">输入分支、tag 或 commit SHA 来切换查看。临时切换，不会写入站点配置。</p>
+            <div class="auth-form">
+                <input type="text" id="ref-input" placeholder="branch / tag / commit" autocomplete="off">
+                <div class="auth-actions">
+                    <button id="ref-cancel" data-en="Cancel" data-zh="取消">取消</button>
+                    <button id="ref-submit" class="primary" data-en="Switch" data-zh="切换">切换</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
 <script src="/static/js/toast.js"></script>
 <script nonce="{{ .Nonce }}">
 (function () {
@@ -120,6 +162,168 @@
     let currentRef = '{{ .Ref }}'; // 临时分支：切换分支时改写，不持久化
     let authResolve = null; // 凭据弹窗的 resolve
     let authFromButton = false; // 凭据弹窗由「凭据」按钮触发（提交后需手动重载文件树）
+
+    // ---------- 主题：读 localStorage + 系统偏好，与首页共用 key ----------
+    let currentLang = localStorage.getItem('lang') ||
+                      (navigator.language.startsWith('zh') ? 'zh' : 'en');
+
+    function applyTheme(theme) {
+        document.documentElement.setAttribute('data-theme', theme);
+        const label = document.querySelector('#theme-toggle-viewer .si-label');
+        if (label) {
+            // 按钮显示「将要切换到的目标」：当前 dark → 显示「亮色」
+            const toLight = theme === 'dark';
+            const en = toLight ? 'Light' : 'Dark';
+            const zh = toLight ? '亮色' : '暗色';
+            label.textContent = currentLang === 'zh' ? zh : en;
+            label.setAttribute('data-en', en);
+            label.setAttribute('data-zh', zh);
+        }
+    }
+
+    function initTheme() {
+        const saved = localStorage.getItem('theme');
+        const systemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        applyTheme(saved || (systemDark ? 'dark' : 'light'));
+
+        const toggle = document.getElementById('theme-toggle-viewer');
+        if (toggle) {
+            toggle.addEventListener('click', () => {
+                const cur = document.documentElement.getAttribute('data-theme');
+                const next = cur === 'dark' ? 'light' : 'dark';
+                applyTheme(next);
+                localStorage.setItem('theme', next);
+                closeSettings();
+            });
+        }
+
+        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
+            if (!localStorage.getItem('theme')) applyTheme(e.matches ? 'dark' : 'light');
+        });
+    }
+
+    function applyLang(lang) {
+        document.querySelectorAll('[data-en][data-zh]').forEach(el => {
+            const text = lang === 'zh' ? el.getAttribute('data-zh') : el.getAttribute('data-en');
+            if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') el.placeholder = text;
+            else el.textContent = text;
+        });
+        const cur = document.documentElement.getAttribute('data-theme') || 'light';
+        applyTheme(cur);
+    }
+
+    // ---------- 设置下拉菜单 ----------
+    function closeSettings() {
+        const m = document.getElementById('settings-menu');
+        const t = document.getElementById('settings-trigger');
+        if (!m || !t) return;
+        m.classList.remove('open');
+        t.setAttribute('aria-expanded', 'false');
+    }
+    function toggleSettings(e) {
+        e.stopPropagation();
+        const m = document.getElementById('settings-menu');
+        const t = document.getElementById('settings-trigger');
+        if (!m || !t) return;
+        if (m.classList.contains('open')) closeSettings();
+        else {
+            m.classList.add('open');
+            t.setAttribute('aria-expanded', 'true');
+        }
+    }
+    function initSettings() {
+        const trigger = document.getElementById('settings-trigger');
+        if (trigger) trigger.addEventListener('click', toggleSettings);
+        // 凭据/删除点击后自动关菜单；主题项自己调 closeSettings
+        document.querySelectorAll('.settings-item').forEach(b => {
+            if (b.id !== 'theme-toggle-viewer' && b.id !== 'hidden-files-btn') b.addEventListener('click', closeSettings);
+        });
+        document.addEventListener('click', (e) => {
+            const m = document.getElementById('settings-menu');
+            if (m && m.classList.contains('open') && !m.contains(e.target)) closeSettings();
+        });
+        document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSettings(); });
+    }
+
+    // ---------- 隐藏文件（点开头）：默认隐藏，按需开启；不持久化 ----------
+    let showHidden = false;
+
+    function isHiddenFile(path) {
+        // 路径最后一段以 . 开头视为隐藏文件（如 .gitignore / .env / .eslintrc）
+        const seg = path.split('/').pop();
+        return seg.length > 0 && seg.charAt(0) === '.';
+    }
+
+    function visibleFiles() {
+        if (showHidden) return allFiles;
+        return allFiles.filter(f => !isHiddenFile(f.path));
+    }
+
+    function updateHiddenFilesBtn() {
+        const btn = document.getElementById('hidden-files-btn');
+        if (!btn) return;
+        btn.classList.toggle('checked', showHidden);
+        btn.setAttribute('aria-pressed', showHidden ? 'true' : 'false');
+    }
+
+    function initHiddenFilesToggle() {
+        const btn = document.getElementById('hidden-files-btn');
+        if (!btn) return;
+        updateHiddenFilesBtn();
+        btn.addEventListener('click', () => {
+            showHidden = !showHidden;
+            updateHiddenFilesBtn();
+            renderTree(visibleFiles());
+            closeSettings();
+        });
+    }
+
+    // ---------- 切换 ref 弹窗 ----------
+    function openRefModal() {
+        const modal = document.getElementById('ref-modal');
+        const input = document.getElementById('ref-input');
+        if (!modal || !input) return;
+        modal.style.display = 'flex';
+        input.value = currentRef;
+        setTimeout(() => { input.focus(); input.select(); }, 0);
+    }
+    function closeRefModal() {
+        const modal = document.getElementById('ref-modal');
+        if (modal) modal.style.display = 'none';
+    }
+    function initRefSwitch() {
+        const btn = document.getElementById('ref-switch-btn');
+        if (btn) btn.addEventListener('click', openRefModal);
+        const cancel = document.getElementById('ref-cancel');
+        if (cancel) cancel.addEventListener('click', closeRefModal);
+        const submit = document.getElementById('ref-submit');
+        if (submit) submit.addEventListener('click', () => {
+            const input = document.getElementById('ref-input');
+            const val = (input && input.value || '').trim();
+            if (!val) return;
+            closeRefModal();
+            switchRef(val);
+        });
+        // 点击遮罩关闭
+        const modal = document.getElementById('ref-modal');
+        if (modal) modal.addEventListener('click', (e) => { if (e.target === modal) closeRefModal(); });
+    }
+
+    // switchRef 切换到任意 ref（分支/tag/commit）：改 currentRef、更新顶部分支名、重载文件树。
+    function switchRef(ref) {
+        currentRef = ref;
+        const nameEl = document.getElementById('branch-name');
+        if (nameEl) nameEl.textContent = ref;
+        const content = document.getElementById('floating-tree-content');
+        if (content) content.innerHTML = '<div class="tree-loading">加载中...</div>';
+        loadFileTree().then(autoOpenDefault);
+    }
+
+    initTheme();
+    applyLang(currentLang);
+    initSettings();
+    initHiddenFilesToggle();
+    initRefSwitch();
 
     // 拼到所有 fetch URL 上的 ?ref=，让后端用当前分支取数据（含默认分支，保持缓存键一致）。
     function refQuery() {
@@ -265,7 +469,7 @@
             }
             const data = await resp.json();
             allFiles = data.files || [];
-            renderTree(allFiles);
+            renderTree(visibleFiles());
         } catch (err) {
             allFiles = []; // 清空旧分支文件列表，避免 autoOpenDefault 用过期列表发请求
             const msg = '加载文件树失败: ' + err.message;

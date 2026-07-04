@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -28,6 +29,7 @@ func main() {
 	httpProxy := flag.String("http-proxy", "", "HTTP proxy (overrides config and env)")
 	httpsProxy := flag.String("https-proxy", "", "HTTPS proxy (overrides config and env)")
 	statePath := flag.String("state", "./gitweb.state.json", "path to state file for persisted sites (empty = in-memory only)")
+	allowHosts := flag.String("allow-host", "", "comma-separated extra hosts to allow through SSRF (e.g. git.example.com); for trusted self-hosted instances that resolve to private IPs")
 	showVersion := flag.Bool("v", false, "print version and exit")
 	flag.Parse()
 
@@ -71,6 +73,15 @@ func main() {
 	}
 	if *httpsProxy != "" {
 		cfg.Fetch.HTTPSProxy = *httpsProxy
+	}
+	// CLI 追加的 allow-host（逗号分隔），与 config 的 allow_hosts 合并、去重。
+	// 用于可信自托管实例（域名解析到私网 IP 时必须显式放行，否则 SSRF 拦截 → unsupported git provider）。
+	if *allowHosts != "" {
+		extra := strings.Split(*allowHosts, ",")
+		for i := range extra {
+			extra[i] = strings.TrimSpace(extra[i])
+		}
+		cfg.Fetch.AllowHosts = append(cfg.Fetch.AllowHosts, extra...)
 	}
 
 	reg := registry.New()

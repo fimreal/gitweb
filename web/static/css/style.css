@@ -426,6 +426,18 @@ body {
     grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
     gap: 0.9rem;
 }
+/* 首页内联「Recent」更紧凑：固定 3 列、卡片更扁 */
+#sites-list.sites-grid {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.6rem;
+}
+#sites-list .site-card { padding: 0.7rem 0.85rem; }
+#sites-list .pathid { font-size: 0.92rem; }
+#sites-list .git-url { font-size: 0.72rem; margin-bottom: 0.35rem; }
+#sites-list .ref-chip { font-size: 0.66rem; padding: 0.12rem 0.5rem; }
+@media (max-width: 768px) {
+    #sites-list.sites-grid { grid-template-columns: 1fr; }
+}
 
 .site-card {
     position: relative;
@@ -636,4 +648,103 @@ pre {
     .input-card { padding: 1.25rem; }
     .compact-grid { grid-template-columns: 1fr; }
     .controls { top: 1rem; right: 1rem; }
+}
+
+/* =========================================================
+   底部：应用简介展开区 + copyright
+   ========================================================= */
+.footer-area {
+    text-align: center;
+    padding: 2rem 2rem 1.75rem;
+    color: var(--secondary);
+}
+/* 简介面板：hidden 用属性，去掉 hidden 走 grid 0fr→1fr 动画 */
+.about-panel {
+    display: grid;
+    grid-template-rows: 0fr;
+    overflow: hidden;
+    min-height: 0;
+    max-width: 640px;
+    margin: 0 auto 1.2rem;
+    transition: grid-template-rows 0.36s var(--ease-apple), margin 0.36s var(--ease-apple);
+}
+.about-panel:not([hidden]) { grid-template-rows: 1fr; }
+.about-panel > .about-inner {
+    min-height: 0;
+    overflow: hidden;
+    text-align: left;
+}
+.about-inner h2 {
+    font-size: 0.92rem;
+    font-weight: 650;
+    color: var(--fg);
+    margin-bottom: 0.6rem;
+    letter-spacing: -0.01em;
+}
+.about-inner p {
+    font-size: 0.86rem;
+    color: var(--fg);
+    line-height: 1.65;
+    margin-bottom: 0.8rem;
+}
+.about-steps {
+    list-style: none;
+    counter-reset: step;
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+}
+.about-steps li {
+    counter-increment: step;
+    position: relative;
+    padding-left: 1.8rem;
+    font-size: 0.84rem;
+    color: var(--fg);
+    line-height: 1.55;
+}
+.about-steps li::before {
+    content: counter(step);
+    position: absolute;
+    left: 0; top: 0.05rem;
+    width: 1.25rem; height: 1.25rem;
+    border-radius: 50%;
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-size: 0.72rem;
+    font-weight: 650;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-variant-numeric: tabular-nums;
+}
+
+/* 展开箭头：默认低调，hover footer 才显现，点击后高亮 */
+.about-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 38px; height: 38px;
+    margin: 0 auto 0.9rem;
+    border: none;
+    background: transparent;
+    color: var(--secondary);
+    cursor: pointer;
+    opacity: 0.45;
+    border-radius: 50%;
+    transition: opacity 0.22s var(--ease-apple), background 0.22s var(--ease-apple), color 0.22s var(--ease-apple);
+}
+.about-toggle .about-chevron {
+    width: 22px; height: 22px;
+    transition: transform 0.32s var(--ease-apple);
+}
+.footer-area:hover .about-toggle,
+.about-toggle:focus-visible { opacity: 1; }
+.about-toggle:hover { background: var(--accent-soft); color: var(--accent); }
+.about-toggle[aria-expanded="true"] { opacity: 1; color: var(--accent); }
+.about-toggle[aria-expanded="true"] .about-chevron { transform: rotate(180deg); }
+
+.copyright {
+    font-size: 0.72rem;
+    letter-spacing: 0.06em;
+    opacity: 0.55;
 }

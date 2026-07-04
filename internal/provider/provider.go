@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -441,6 +442,35 @@ func probeHost(gitURL string) (scheme, host string, ok bool) {
 		scheme = "https"
 	}
 	return scheme, u.Host, true
+}
+
+// SsrfHint 检测 gitURL 的 host 是否因解析到私网 IP 而被 SSRF 规则拦截
+// （且未被 allow 列表放行）。命中则返回给用户的可操作提示，否则返回 ""。
+// 用于把 "unsupported git provider" 这种含糊错误具体化。
+func (m *Manager) SsrfHint(gitURL string) string {
+	_, host, ok := probeHost(gitURL)
+	if !ok {
+		return ""
+	}
+	// 复用 SSRF 判定：若 allow 已放行就不会进这里（provider 已识别成功）。
+	// 这里只看「host 解析到私网且未在 allow」这一种情况。
+	h := hostOnly(host)
+	if ip := net.ParseIP(h); ip != nil {
+		if isPrivateIP(ip) {
+			return "host is a private IP; start server with --allow-host " + h + " (or config fetch.allow_hosts) to trust this self-hosted instance"
+		}
+		return ""
+	}
+	ips, err := net.LookupIP(h)
+	if err != nil {
+		return ""
+	}
+	for _, ip := range ips {
+		if isPrivateIP(ip) {
+			return "host resolves to a private IP; start server with --allow-host " + h + " (or config fetch.allow_hosts) to trust this self-hosted instance"
+		}
+	}
+	return ""
 }
 
 // probeProvider 依次探测 Gitea(/api/v1/version) 与 GitLab(/api/v4/version)。
