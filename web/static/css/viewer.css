@@ -337,6 +337,24 @@ body {
 [data-theme="dark"] .settings-item.danger:hover, :root:not([data-theme="light"]) .settings-item.danger:hover { background: rgba(248, 113, 113, 0.10); }
 .settings-divider { height: 1px; background: var(--border); margin: 5px 4px; }
 
+/* 站点信息列表 */
+.info-list { display: flex; flex-direction: column; gap: 10px; margin: 4px 0 14px; }
+.info-row { display: flex; flex-direction: column; gap: 2px; }
+.info-row dt {
+    font-size: 11px;
+    color: var(--secondary);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    font-weight: 600;
+}
+.info-row dd {
+    margin: 0;
+    font-size: 14px;
+    color: var(--fg);
+    word-break: break-all;
+    line-height: 1.45;
+}
+
 .content-area {
     flex: 1;
     overflow: auto;
