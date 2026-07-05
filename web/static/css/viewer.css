@@ -515,7 +515,19 @@ body {
     align-items: center;
     gap: 8px;
 }
-.floating-tree-titlebar h3 .ft-icon { width: 16px; height: 16px; color: var(--accent); }
+.floating-tree-titlebar h3 .ft-icon { width: 16px; height: 16px; color: var(--accent); flex-shrink: 0; }
+.floating-tree-titlebar h3 .ft-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* 窄屏（手机或窗口过小）：隐藏"文件目录"文字，只留图标，节省标题栏空间 */
+@media (max-width: 480px) {
+    .floating-tree-titlebar h3 .ft-title { display: none; }
+    .floating-tree-titlebar h3 { gap: 0; }
+    .floating-tree-titlebar { padding: 11px 8px 11px 12px; }
+    .floating-tree-controls { gap: 2px; }
+    .floating-tree-btn { width: 22px; height: 22px; }
+    .dock-switch-btn { padding: 3px; }
+    .dock-switch-btn svg { width: 12px; height: 12px; }
+}
 
 /* 停靠切换按钮（标题栏向下箭头，仅 docked 态显示；位于 controls 区 minimize 左侧） */
 .dock-switch-btn {
