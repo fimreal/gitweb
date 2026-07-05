@@ -557,18 +557,22 @@
     }
 
     // ---------- 凭据（sessionStorage 本会话 / localStorage 持久 7 天） ----------
-    // 读取优先级：localStorage（带过期）> sessionStorage（本会话）
+    // 运行时只读 sessionStorage（与原行为一致，保证用户刚输入的凭据立即生效）。
+    // localStorage 仅用于页面加载时跨会话恢复 → 恢复到 sessionStorage 后就不再读取。
     function getStoredAuth() {
+        try { return JSON.parse(sessionStorage.getItem(STORAGE_KEY)); } catch (e) { return null; }
+    }
+    // 页面加载时从 localStorage 恢复持久凭据到 sessionStorage（一次性）
+    function restoreAuthFromLocal() {
         try {
             const saved = JSON.parse(localStorage.getItem(STORAGE_KEY_LOCAL));
             if (saved && saved.expiresAt && Date.now() < saved.expiresAt) {
-                // 同步到 sessionStorage，保证本会话 authHeader 一致
                 sessionStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
-                return saved;
+                return true;
             }
-            if (saved) localStorage.removeItem(STORAGE_KEY_LOCAL); // 过期清理
+            if (saved) localStorage.removeItem(STORAGE_KEY_LOCAL);
         } catch (e) {}
-        try { return JSON.parse(sessionStorage.getItem(STORAGE_KEY)); } catch (e) { return null; }
+        return false;
     }
     // persist=true → 存 localStorage 并带 7 天过期；false → 仅 sessionStorage 并清掉旧持久记录
     function storeAuth(auth, persist) {
@@ -612,8 +616,8 @@
         let resp = await fetch(url, opts);
         while (resp.status === 401) {
             const prevAuth = getStoredAuth();
-            // 清掉失效凭据（持久 + 会话），避免循环用旧凭据
-            clearAllAuth();
+            // 清掉 sessionStorage（localStorage 的持久记录保留，仅当用户确认换新凭据时才覆盖）
+            sessionStorage.removeItem(STORAGE_KEY);
             // 上次有凭据还 401 → 说明凭据无效，弹窗时显示错误提示
             authFailed = !!prevAuth;
             lastFailedType = prevAuth ? prevAuth.type : null;
@@ -621,7 +625,9 @@
             if (!auth) break; // 用户取消 → 返回 401
             authFailed = false;
             lastFailedType = null;
-            opts.headers = Object.assign({}, opts.headers || {}, authHeader());
+            // 重新构造 headers（清掉旧的 Authorization，用 storeAuth 后的新值）
+            opts.headers = {};
+            opts.headers = Object.assign(opts.headers, authHeader());
             resp = await fetch(url, opts);
         }
         return resp;
@@ -1691,6 +1697,7 @@
         initFloatingTree();
         initAutoHideHeader();
         initBranchSwitcher();
+        restoreAuthFromLocal(); // 从 localStorage 恢复持久凭据到 sessionStorage
         loadFileTree().then(autoOpenDefault);
 
         const refreshBtn = document.getElementById('refresh-tree-btn');
