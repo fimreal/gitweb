@@ -675,7 +675,6 @@ body {
 .floating-tree-window.docked {
     position: fixed;
     border-radius: 0;
-    box-shadow: var(--shadow-lg);
     animation: none;
 }
 .floating-tree-window.docked .floating-tree-titlebar { cursor: grab; }
@@ -691,7 +690,8 @@ body {
     height: auto !important; max-height: none;
     border-radius: 0;
     border-left: none;
-    border-right: 3px solid var(--border);
+    border-right: 1px solid var(--border);
+    box-shadow: 4px 0 10px rgba(15, 23, 42, 0.04);
     cursor: ew-resize;
 }
 /* 右停靠：贴右缘全高，左侧可拖拽调宽 */
@@ -701,7 +701,8 @@ body {
     height: auto !important; max-height: none;
     border-radius: 0;
     border-right: none;
-    border-left: 3px solid var(--border);
+    border-left: 1px solid var(--border);
+    box-shadow: -4px 0 10px rgba(15, 23, 42, 0.04);
     cursor: ew-resize;
 }
 /* 底停靠：贴底部全宽，上侧可拖拽调高 */
@@ -711,8 +712,21 @@ body {
     height: var(--dock-h, 320px); max-height: 70vh; min-height: 120px;
     border-radius: 0;
     border-bottom: none;
-    border-top: 3px solid var(--border);
+    border-top: 1px solid var(--border);
+    box-shadow: 0 -4px 10px rgba(15, 23, 42, 0.04);
     cursor: ns-resize;
+}
+[data-theme="dark"] .floating-tree-window.docked-left,
+:root:not([data-theme="light"]) .floating-tree-window.docked-left {
+    box-shadow: 4px 0 10px rgba(0, 0, 0, 0.35);
+}
+[data-theme="dark"] .floating-tree-window.docked-right,
+:root:not([data-theme="light"]) .floating-tree-window.docked-right {
+    box-shadow: -4px 0 10px rgba(0, 0, 0, 0.35);
+}
+[data-theme="dark"] .floating-tree-window.docked-bottom,
+:root:not([data-theme="light"]) .floating-tree-window.docked-bottom {
+    box-shadow: 0 -4px 10px rgba(0, 0, 0, 0.35);
 }
 /* 停靠态内部元素恢复默认 cursor（只有边缘是 resize） */
 .floating-tree-window.docked .floating-tree-titlebar,
