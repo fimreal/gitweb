@@ -517,14 +517,10 @@ body {
 }
 .floating-tree-titlebar h3 .ft-icon { width: 16px; height: 16px; color: var(--accent); }
 
-/* 停靠切换按钮（标题栏向下箭头，仅 docked 态显示） */
+/* 停靠切换按钮（标题栏向下箭头，仅 docked 态显示；位于 controls 区 minimize 左侧） */
 .dock-switch-btn {
-    margin-left: 2px;
-    padding: 2px;
-    border: none;
-    background: transparent;
+    padding: 4px;
     color: var(--secondary);
-    border-radius: var(--r-sm);
     cursor: pointer;
     display: flex;
     align-items: center;
@@ -812,6 +808,7 @@ body {
     border: 1px solid var(--border);
     border-radius: var(--r-md);
     overflow: hidden;
+    max-width: 1024px; margin-inline: auto;
 }
 .code-header {
     padding: 10px 16px;
@@ -871,7 +868,7 @@ body {
 }
 
 /* markdown 渲染结果 */
-.markdown-body { max-width: 820px; line-height: 1.7; }
+.markdown-body { max-width: 820px; margin-inline: auto; line-height: 1.7; }
 .markdown-body h1, .markdown-body h2, .markdown-body h3 { margin: 1.4em 0 0.6em; }
 .markdown-body p { margin: 0.6em 0; }
 .markdown-body pre {

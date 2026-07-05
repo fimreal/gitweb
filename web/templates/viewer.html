@@ -16,12 +16,12 @@
                     <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
                 </svg>
                 <span class="ft-title" data-en="Files" data-zh="文件目录">文件目录</span>
-                <!-- 停靠方向切换按钮：仅 docked 态显示，点击弹菜单切左/底/右 -->
-                <button class="dock-switch-btn" id="dock-switch-btn" type="button" title="切换停靠位置" data-en-title="Switch dock side" data-zh-title="切换停靠位置" aria-label="切换停靠位置" style="display:none;">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
-                </button>
             </h3>
             <div class="floating-tree-controls">
+                <!-- 停靠方向切换按钮：仅 docked 态显示，点击弹菜单切左/底/右 -->
+                <button class="dock-switch-btn floating-tree-btn" id="dock-switch-btn" type="button" title="切换停靠位置" data-en-title="Switch dock side" data-zh-title="切换停靠位置" aria-label="切换停靠位置" style="display:none;">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+                </button>
                 <button class="floating-tree-btn refresh" id="refresh-tree-btn" title="刷新文件树" data-en-title="Refresh tree" data-zh-title="刷新文件树" aria-label="刷新文件树">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
                 </button>
@@ -1233,13 +1233,21 @@
             }
         }
         // 停靠时给内容区让位：左/右停靠留侧边 padding，底停靠留底部 padding。
+        // 同时给 viewer-header 让位，左/右停靠时标题栏也需要偏移。
         // 用 px 直接设，宽度跟着浮窗实际尺寸走（resize 后由 ResizeObserver 同步）。
         function applyContentInset(side) {
             if (!contentArea) return;
             clearContentInset();
             const w = win.offsetWidth, h = win.offsetHeight;
-            if (side === 'left')   contentArea.style.paddingLeft  = (w + 12) + 'px';
-            if (side === 'right')  contentArea.style.paddingRight = (w + 12) + 'px';
+            const header = document.querySelector('.viewer-header');
+            if (side === 'left') {
+                contentArea.style.paddingLeft  = (w + 12) + 'px';
+                if (header) header.style.paddingLeft = (w + 12) + 'px';
+            }
+            if (side === 'right') {
+                contentArea.style.paddingRight = (w + 12) + 'px';
+                if (header) header.style.paddingRight = (w + 12) + 'px';
+            }
             if (side === 'bottom') contentArea.style.paddingBottom = (h + 12) + 'px';
         }
         function clearContentInset() {
@@ -1247,6 +1255,8 @@
             contentArea.style.paddingLeft = '';
             contentArea.style.paddingRight = '';
             contentArea.style.paddingBottom = '';
+            const header = document.querySelector('.viewer-header');
+            if (header) { header.style.paddingLeft = ''; header.style.paddingRight = ''; }
         }
 
         // ---- 停靠态拖边缘改宽/高 ----
