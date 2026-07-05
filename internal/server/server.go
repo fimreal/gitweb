@@ -210,6 +210,7 @@ func (s *Server) handleGetTree(c *gin.Context) {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
 			return
 		}
+		log.Printf("[tree-error] pathid=%s provider=%s giturl=%s ref=%s err=%v", pathID, site.Provider, site.GitURL, ref, err)
 		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to fetch tree: " + err.Error()})
 		return
 	}

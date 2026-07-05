@@ -139,7 +139,7 @@
             </div>
         </div>
         <div class="content-area" id="content-area">
-            <div class="welcome" data-en="Click the folder icon to browse files" data-zh="点右上角文件夹图标浏览文件">点右上角文件夹图标浏览文件</div>
+            <div class="welcome" data-en="Click the folder icon at the bottom-right to browse files" data-zh="点右下角文件夹图标浏览文件">点右下角文件夹图标浏览文件</div>
         </div>
     </main>
 
@@ -608,26 +608,39 @@
         if (a.type === 'basic') return { 'Authorization': 'Basic ' + btoa(a.username + ':' + a.password) };
         return {};
     }
+    // 临时诊断：打印 authHeader 返回的凭据类型（不打印凭据本身）
+    function logAuthState(label) {
+        const a = getStoredAuth();
+        const ss = sessionStorage.getItem(STORAGE_KEY);
+        const ls = localStorage.getItem(STORAGE_KEY_LOCAL);
+        console.log('[auth-diag]', label, 'session:', ss ? (ss.length + ' chars, type=' + (JSON.parse(ss)||{}).type) : 'null',
+                    'local:', ls ? (ls.length + ' chars') : 'null',
+                    'header:', a ? a.type : 'null');
+    }
 
     // 带鉴权的 fetch：401 时弹窗要凭据，输入后重试。循环直到成功或用户取消。
     async function authFetch(url, opts) {
         opts = opts || {};
         opts.headers = Object.assign({}, opts.headers || {}, authHeader());
+        logAuthState('authFetch-start');
         let resp = await fetch(url, opts);
         while (resp.status === 401) {
             const prevAuth = getStoredAuth();
-            // 清掉 sessionStorage（localStorage 的持久记录保留，仅当用户确认换新凭据时才覆盖）
             sessionStorage.removeItem(STORAGE_KEY);
-            // 上次有凭据还 401 → 说明凭据无效，弹窗时显示错误提示
             authFailed = !!prevAuth;
             lastFailedType = prevAuth ? prevAuth.type : null;
             const auth = await promptAuth();
             if (!auth) break; // 用户取消 → 返回 401
             authFailed = false;
             lastFailedType = null;
-            // 重新构造 headers（清掉旧的 Authorization，用 storeAuth 后的新值）
-            opts.headers = {};
-            opts.headers = Object.assign(opts.headers, authHeader());
+            logAuthState('authFetch-retry-after-input');
+            // 重新构造完整 headers：清掉旧的 Authorization，用新凭据
+            const baseHeaders = {};
+            for (const k in opts.headers) {
+                if (k.toLowerCase() !== 'authorization') baseHeaders[k] = opts.headers[k];
+            }
+            opts.headers = Object.assign(baseHeaders, authHeader());
+            logAuthState('authFetch-retry-header-built');
             resp = await fetch(url, opts);
         }
         return resp;
@@ -684,6 +697,7 @@
         else { auth.username = document.getElementById('auth-username').value; auth.password = document.getElementById('auth-password').value; }
         const persist = document.getElementById('auth-save-local').checked;
         storeAuth(auth, persist);
+        logAuthState('submit-stored');
         const fromButton = authFromButton;
         authFromButton = false;
         closeAuth(auth);
@@ -1697,7 +1711,8 @@
         initFloatingTree();
         initAutoHideHeader();
         initBranchSwitcher();
-        restoreAuthFromLocal(); // 从 localStorage 恢复持久凭据到 sessionStorage
+        const restored = restoreAuthFromLocal();
+        logAuthState('DOMContentLoaded-restored=' + restored);
         loadFileTree().then(autoOpenDefault);
 
         const refreshBtn = document.getElementById('refresh-tree-btn');
