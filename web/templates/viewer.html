@@ -227,12 +227,12 @@
         document.documentElement.setAttribute('data-theme', theme);
         const btn = document.getElementById('theme-toggle-viewer');
         if (!btn) return;
-        // 图标 + 文案 = 当前状态：dark → 月亮 + "暗色"；light → 太阳 + "亮色"
+        // 图标 + 文案 = 当前状态：dark → 月亮 + "暗色主题"；light → 太阳 + "亮色主题"
         btn.classList.toggle('checked', theme === 'dark');
         const label = btn.querySelector('.si-label');
         if (label) {
-            const en = theme === 'dark' ? 'Dark' : 'Light';
-            const zh = theme === 'dark' ? '暗色' : '亮色';
+            const en = theme === 'dark' ? 'Dark theme' : 'Light theme';
+            const zh = theme === 'dark' ? '暗色主题' : '亮色主题';
             label.textContent = currentLang === 'zh' ? zh : en;
             label.setAttribute('data-en', en);
             label.setAttribute('data-zh', zh);
@@ -289,7 +289,7 @@
         if (!btn) return;
         const label = btn.querySelector('.si-label');
         if (label) {
-            // 显示当前语言名：zh → 「中文」，en → 「English」
+            // 显示当前语言全称：zh → 「中文」，en → 「English」
             label.textContent = currentLang === 'zh' ? '中文' : 'English';
         }
         btn.setAttribute('aria-pressed', currentLang === 'zh' ? 'true' : 'false');
@@ -360,11 +360,11 @@
         if (!btn) return;
         btn.classList.toggle('checked', showHidden);
         btn.setAttribute('aria-pressed', showHidden ? 'true' : 'false');
-        // 文案 = 当前状态：隐藏中 → 「隐藏」，显示中 → 「显示」
+        // 文案 = 当前状态：隐藏中 → 「已隐藏」，显示中 → 「已显示」
         const label = btn.querySelector('.si-label');
         if (label) {
-            const en = showHidden ? 'Shown' : 'Hidden';
-            const zh = showHidden ? '显示' : '隐藏';
+            const en = showHidden ? 'Hidden files: shown' : 'Hidden files: hidden';
+            const zh = showHidden ? '隐藏文件：已显示' : '隐藏文件：已隐藏';
             label.textContent = currentLang === 'zh' ? zh : en;
             label.setAttribute('data-en', en);
             label.setAttribute('data-zh', zh);
@@ -392,11 +392,11 @@
         if (!btn) return;
         btn.classList.toggle('checked', showLineNumbers);
         btn.setAttribute('aria-pressed', showLineNumbers ? 'true' : 'false');
-        // 文案 = 当前状态：有行号 → 「行号」，无行号 → 「无行号」
+        // 文案 = 当前状态：有行号 → 「行号：开」，无行号 → 「行号：关」
         const label = btn.querySelector('.si-label');
         if (label) {
-            const en = showLineNumbers ? 'Line numbers' : 'No line numbers';
-            const zh = showLineNumbers ? '行号' : '无行号';
+            const en = showLineNumbers ? 'Line numbers: on' : 'Line numbers: off';
+            const zh = showLineNumbers ? '行号：开' : '行号：关';
             label.textContent = currentLang === 'zh' ? zh : en;
             label.setAttribute('data-en', en);
             label.setAttribute('data-zh', zh);
