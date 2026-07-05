@@ -679,9 +679,9 @@ body {
 }
 .floating-tree-window.docked .floating-tree-titlebar { cursor: grab; }
 .floating-tree-window.docked .min-dock { display: none; }
-/* 停靠态标题栏紧凑：去掉多余 padding，避免挤占标题显示 */
-.floating-tree-window.docked .floating-tree-titlebar { padding: 8px 10px 8px 14px; }
-.floating-tree-window.docked .floating-tree-titlebar h3 { font-size: 12.5px; }
+/* 停靠态标题栏：顶部 padding 与 viewer-header 一致(14px)，让两侧标题视觉对齐 */
+.floating-tree-window.docked .floating-tree-titlebar { padding: 14px 10px 14px 24px; }
+.floating-tree-window.docked .floating-tree-titlebar h3 { font-size: 13px; }
 
 /* 左停靠：贴左缘全高，右侧可拖拽调宽 */
 .floating-tree-window.docked-left {
