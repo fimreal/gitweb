@@ -230,6 +230,7 @@
     let authResolve = null; // 凭据弹窗的 resolve
     let authFromButton = false; // 凭据弹窗由「凭据」按钮触发（提交后需手动重载文件树）
     let authFailed = false; // 上次凭据是否无效（用于弹窗显示错误提示）
+    let lastFailedType = null; // 上次失败的凭据类型（basic/token），用于给出针对性提示
 
     // ---------- 主题：读 localStorage + 系统偏好，与首页共用 key ----------
     let currentLang = localStorage.getItem('lang') ||
@@ -610,14 +611,16 @@
         opts.headers = Object.assign({}, opts.headers || {}, authHeader());
         let resp = await fetch(url, opts);
         while (resp.status === 401) {
-            const hadAuth = !!getStoredAuth();
+            const prevAuth = getStoredAuth();
             // 清掉失效凭据（持久 + 会话），避免循环用旧凭据
             clearAllAuth();
             // 上次有凭据还 401 → 说明凭据无效，弹窗时显示错误提示
-            authFailed = hadAuth;
+            authFailed = !!prevAuth;
+            lastFailedType = prevAuth ? prevAuth.type : null;
             const auth = await promptAuth();
             if (!auth) break; // 用户取消 → 返回 401
             authFailed = false;
+            lastFailedType = null;
             opts.headers = Object.assign({}, opts.headers || {}, authHeader());
             resp = await fetch(url, opts);
         }
@@ -633,9 +636,18 @@
         const errEl = document.getElementById('auth-error');
         if (errEl) {
             if (authFailed) {
-                errEl.textContent = currentLang === 'zh'
-                    ? '上次输入的凭据无效，请重新输入'
-                    : 'Previous credentials were invalid, please try again';
+                let msg;
+                if (lastFailedType === 'basic') {
+                    // 账号密码失败：常见原因是 Gitea/GitLab 禁用了 Basic Auth
+                    msg = currentLang === 'zh'
+                        ? '账号密码无效。此站点可能禁用了 Basic Auth，请改用 Personal Access Token（在 Gitea 设置 → 应用 → 生成令牌）'
+                        : 'Username/password failed. This site may have disabled Basic Auth — please use a Personal Access Token (Gitea Settings → Applications → Generate Token)';
+                } else {
+                    msg = currentLang === 'zh'
+                        ? '上次输入的凭据无效，请重新输入'
+                        : 'Previous credentials were invalid, please try again';
+                }
+                errEl.textContent = msg;
                 errEl.style.display = 'block';
             } else {
                 errEl.style.display = 'none';
@@ -700,6 +712,7 @@
             }
             authFromButton = true;
             authFailed = false; // 按钮触发是全新输入，不显示"上次无效"提示
+            lastFailedType = null;
             promptAuth();
         });
     }
