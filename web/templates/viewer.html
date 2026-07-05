@@ -15,13 +15,13 @@
                 <svg class="ft-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                     <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
                 </svg>
-                文件目录
+                <span class="ft-title" data-en="Files" data-zh="文件目录">文件目录</span>
             </h3>
             <div class="floating-tree-controls">
-                <button class="floating-tree-btn refresh" id="refresh-tree-btn" title="刷新文件树" aria-label="刷新文件树">
+                <button class="floating-tree-btn refresh" id="refresh-tree-btn" title="刷新文件树" data-en-title="Refresh tree" data-zh-title="刷新文件树" aria-label="刷新文件树">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
                 </button>
-                <button class="floating-tree-btn minimize" id="minimize-btn" title="缩为迷你浮岛" aria-label="缩小">
+                <button class="floating-tree-btn minimize" id="minimize-btn" title="缩为迷你浮岛" data-en-title="Minimize to dock" data-zh-title="缩为迷你浮岛" aria-label="缩小">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M5 12h14"/></svg>
                 </button>
             </div>
@@ -33,16 +33,30 @@
             </svg>
         </div>
         <div class="floating-tree-content" id="floating-tree-content">
-            <div class="tree-loading">加载中...</div>
+            <div class="tree-loading" data-en="Loading..." data-zh="加载中...">加载中...</div>
         </div>
     </div>
 
     <!-- 气泡提示：首次打开时引导点击浮岛展开文件目录。
          放在 .floating-tree-window 外层（该窗口 overflow:hidden + transform 会裁剪 fixed 子元素） -->
     <div class="dock-bubble" id="dock-bubble" style="display:none;">
-        <span>点击查看文件目录</span>
-        <button class="dock-bubble-close" id="dock-bubble-close" title="知道了" aria-label="知道了">
+        <span data-en="Click to browse files" data-zh="点击查看文件目录">点击查看文件目录</span>
+        <button class="dock-bubble-close" id="dock-bubble-close" title="知道了" data-en-title="Got it" data-zh-title="知道了" aria-label="知道了">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+    </div>
+
+    <!-- 停靠方向菜单：长按"-"按钮触发。放外层避免被浮窗 overflow:hidden 裁剪。
+         三选一：左 / 底 / 右（DevTools 风格；"中"理解为底部）。 -->
+    <div class="dock-side-menu" id="dock-side-menu" role="menu" aria-label="停靠文件目录" style="display:none;">
+        <button class="dock-side-btn" type="button" data-side="left" title="停靠到左侧">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="4" width="7" height="16" rx="1.5"/><rect x="12" y="4" width="9" height="16" rx="1.5" fill="currentColor" opacity="0.18"/></svg>
+        </button>
+        <button class="dock-side-btn" type="button" data-side="bottom" title="停靠到底部">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="4" width="18" height="9" rx="1.5"/><rect x="3" y="15" width="18" height="5" rx="1.5" fill="currentColor" opacity="0.18"/></svg>
+        </button>
+        <button class="dock-side-btn" type="button" data-side="right" title="停靠到右侧">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="14" y="4" width="7" height="16" rx="1.5"/><rect x="3" y="4" width="9" height="16" rx="1.5" fill="currentColor" opacity="0.18"/></svg>
         </button>
     </div>
 
@@ -59,12 +73,12 @@
                         <svg class="branch-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
                     </button>
                     <div class="branch-menu" id="branch-menu" role="listbox" aria-label="分支">
-                        <div class="branch-menu-loading">加载中...</div>
+                        <div class="branch-menu-loading" data-en="Loading..." data-zh="加载中...">加载中...</div>
                     </div>
                 </div>
             </div>
             <div class="content-header-actions">
-                <a href="/" class="home-link">← 首页</a>
+                <a href="/" class="home-link"><span data-en="← Home" data-zh="← 首页">← 首页</span></a>
                 <div class="settings-menu" id="settings-menu">
                     <button class="settings-trigger" id="settings-trigger" title="设置" aria-haspopup="menu" aria-expanded="false" aria-label="设置">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
@@ -74,13 +88,11 @@
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
                             <span class="si-label" data-en="Light" data-zh="亮色">亮色</span>
                         </button>
-                        <button class="settings-item" id="ref-switch-btn" role="menuitem" type="button">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="6" r="2.5"/><path d="M6 8.5v7"/><path d="M6 12h6a3 3 0 0 0 3-3V8.5"/></svg>
-                            <span class="si-label" data-en="Switch ref" data-zh="切换 ref">切换 ref</span>
-                        </button>
-                        <button class="settings-item" id="auth-site-btn" role="menuitem" type="button">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="7.5" cy="15.5" r="3.5"/><path d="M10.5 15V7.5a2 2 0 0 1 2-2H18"/><path d="M15 3.5l3 2-3 2"/></svg>
-                            <span class="si-label" data-en="Credentials" data-zh="凭据">凭据</span>
+                        <button class="settings-item" id="lang-toggle-viewer" role="menuitem" type="button" aria-pressed="false">
+                            <!-- 地球图标 -->
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+                            <!-- 文案=将要切换到的目标语言：当前 zh → 「English」，当前 en → 「中文」 -->
+                            <span class="si-label">English</span>
                         </button>
                         <div class="settings-divider"></div>
                         <button class="settings-item" id="hidden-files-btn" role="menuitem" type="button" aria-pressed="false">
@@ -104,6 +116,14 @@
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
                             <span class="si-label" data-en="Site info" data-zh="站点信息">站点信息</span>
                         </button>
+                        <button class="settings-item" id="ref-switch-btn" role="menuitem" type="button">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="6" r="2.5"/><path d="M6 8.5v7"/><path d="M6 12h6a3 3 0 0 0 3-3V8.5"/></svg>
+                            <span class="si-label" data-en="Switch ref" data-zh="切换 ref">切换 ref</span>
+                        </button>
+                        <button class="settings-item" id="auth-site-btn" role="menuitem" type="button">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="7.5" cy="15.5" r="3.5"/><path d="M10.5 15V7.5a2 2 0 0 1 2-2H18"/><path d="M15 3.5l3 2-3 2"/></svg>
+                            <span class="si-label" data-en="Credentials" data-zh="凭据">凭据</span>
+                        </button>
                         <button class="settings-item danger" id="delete-site-btn" role="menuitem" type="button">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
                             <span class="si-label" data-en="Delete site" data-zh="删除站点">删除站点</span>
@@ -120,19 +140,19 @@
     <!-- 凭据输入弹窗（私有仓库运行时鉴权） -->
     <div class="auth-modal" id="auth-modal" style="display:none;">
         <div class="auth-modal-card">
-            <h2>该仓库需要鉴权</h2>
-            <p>此 Git 仓库无公开访问权限，请输入凭据。凭据仅保存在当前浏览器标签页（sessionStorage），关闭即清除，不会上传服务器存储。</p>
+            <h2 data-en="Authentication required" data-zh="该仓库需要鉴权">该仓库需要鉴权</h2>
+            <p data-en="This repository is not publicly accessible. Enter credentials to continue. Credentials are stored only in this browser tab (sessionStorage), cleared on close, and never sent to the server." data-zh="此 Git 仓库无公开访问权限，请输入凭据。凭据仅保存在当前浏览器标签页（sessionStorage），关闭即清除，不会上传服务器存储。">此 Git 仓库无公开访问权限，请输入凭据。凭据仅保存在当前浏览器标签页（sessionStorage），关闭即清除，不会上传服务器存储。</p>
             <div class="auth-form">
                 <select id="auth-type">
-                    <option value="token">Token</option>
-                    <option value="basic">账号密码</option>
+                    <option value="token" data-en="Token" data-zh="Token">Token</option>
+                    <option value="basic" data-en="Username & Password" data-zh="账号密码">账号密码</option>
                 </select>
-                <input type="password" id="auth-token" placeholder="Token" autocomplete="off">
-                <input type="text" id="auth-username" placeholder="用户名" autocomplete="off" style="display:none;">
-                <input type="password" id="auth-password" placeholder="密码" autocomplete="off" style="display:none;">
+                <input type="password" id="auth-token" placeholder="Token" data-en-placeholder="Token" data-zh-placeholder="Token" autocomplete="off">
+                <input type="text" id="auth-username" placeholder="用户名" data-en-placeholder="Username" data-zh-placeholder="用户名" autocomplete="off" style="display:none;">
+                <input type="password" id="auth-password" placeholder="密码" data-en-placeholder="Password" data-zh-placeholder="密码" autocomplete="off" style="display:none;">
                 <div class="auth-actions">
-                    <button id="auth-cancel">取消</button>
-                    <button id="auth-submit" class="primary">确认</button>
+                    <button id="auth-cancel" data-en="Cancel" data-zh="取消">取消</button>
+                    <button id="auth-submit" class="primary" data-en="Confirm" data-zh="确认">确认</button>
                 </div>
             </div>
         </div>
@@ -141,11 +161,12 @@
     <!-- 删除确认弹窗 -->
     <div class="auth-modal" id="delete-modal" style="display:none;">
         <div class="auth-modal-card">
-            <h2>确认删除？</h2>
-            <p>即将删除站点 <strong id="delete-pathid"></strong>（<span id="delete-repo"></span>）。此操作不可撤销，删除后将返回首页。</p>
+            <h2 data-en="Confirm delete?" data-zh="确认删除？">确认删除？</h2>
+            <!-- 文案含动态 pathid/repo，由 JS 在打开时按 currentLang 拼接 -->
+            <p id="delete-message"></p>
             <div class="auth-actions">
-                <button id="delete-cancel">取消</button>
-                <button id="delete-confirm" class="primary">删除</button>
+                <button id="delete-cancel" data-en="Cancel" data-zh="取消">取消</button>
+                <button id="delete-confirm" class="primary" data-en="Delete" data-zh="删除">删除</button>
             </div>
         </div>
     </div>
@@ -241,8 +262,44 @@
             if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') el.placeholder = text;
             else el.textContent = text;
         });
+        // 带 data-en-placeholder/data-zh-placeholder 的 input（凭据弹窗的用户名/密码）
+        document.querySelectorAll('[data-en-placeholder][data-zh-placeholder]').forEach(el => {
+            el.placeholder = lang === 'zh' ? el.getAttribute('data-zh-placeholder') : el.getAttribute('data-en-placeholder');
+        });
+        // 带 data-en-title/data-zh-title 的元素（刷新/最小化按钮 title 等）
+        document.querySelectorAll('[data-en-title][data-zh-title]').forEach(el => {
+            el.title = lang === 'zh' ? el.getAttribute('data-zh-title') : el.getAttribute('data-en-title');
+        });
         const cur = document.documentElement.getAttribute('data-theme') || 'light';
         applyTheme(cur);
+        // 三个「动态文案」按钮：label 由各自 update 函数按 currentLang 重算
+        updateHiddenFilesBtn();
+        updateLineNumbersBtn();
+        updateLangToggleBtn();
+    }
+
+    // ---------- 语言切换：与首页共用 localStorage('lang') ----------
+    function updateLangToggleBtn() {
+        const btn = document.getElementById('lang-toggle-viewer');
+        if (!btn) return;
+        const label = btn.querySelector('.si-label');
+        if (label) {
+            // 显示「将要切换到的目标语言」：当前 zh → 「English」，当前 en → 「中文」
+            label.textContent = currentLang === 'zh' ? 'English' : '中文';
+        }
+        btn.setAttribute('aria-pressed', currentLang === 'zh' ? 'true' : 'false');
+    }
+
+    function initLangToggle() {
+        const btn = document.getElementById('lang-toggle-viewer');
+        if (!btn) return;
+        updateLangToggleBtn();
+        btn.addEventListener('click', () => {
+            currentLang = currentLang === 'zh' ? 'en' : 'zh';
+            localStorage.setItem('lang', currentLang);
+            applyLang(currentLang);
+            closeSettings();
+        });
     }
 
     // ---------- 设置下拉菜单 ----------
@@ -269,7 +326,7 @@
         if (trigger) trigger.addEventListener('click', toggleSettings);
         // 凭据/删除点击后自动关菜单；主题项自己调 closeSettings
         document.querySelectorAll('.settings-item').forEach(b => {
-            if (b.id !== 'theme-toggle-viewer' && b.id !== 'hidden-files-btn' && b.id !== 'line-numbers-btn') b.addEventListener('click', closeSettings);
+            if (b.id !== 'theme-toggle-viewer' && b.id !== 'hidden-files-btn' && b.id !== 'line-numbers-btn' && b.id !== 'lang-toggle-viewer') b.addEventListener('click', closeSettings);
         });
         document.addEventListener('click', (e) => {
             const m = document.getElementById('settings-menu');
@@ -420,7 +477,7 @@
         const nameEl = document.getElementById('branch-name');
         if (nameEl) nameEl.textContent = ref;
         const content = document.getElementById('floating-tree-content');
-        if (content) content.innerHTML = '<div class="tree-loading">加载中...</div>';
+        if (content) content.innerHTML = '<div class="tree-loading">' + (currentLang === 'zh' ? '加载中...' : 'Loading...') + '</div>';
         loadFileTree().then(autoOpenDefault);
     }
 
@@ -462,6 +519,7 @@
     initTheme();
     applyLang(currentLang);
     initSettings();
+    initLangToggle();
     initHiddenFilesToggle();
     initLineNumbersToggle();
     initRefSwitch();
@@ -534,9 +592,9 @@
         // 401 自动触发的弹窗不需要这里重载——authFetch 会自行重试当前请求。
         if (fromButton) {
             const content = document.getElementById('floating-tree-content');
-            if (content) content.innerHTML = '<div class="tree-loading">加载中...</div>';
+            if (content) content.innerHTML = '<div class="tree-loading">' + (currentLang === 'zh' ? '加载中...' : 'Loading...') + '</div>';
             loadFileTree().then(autoOpenDefault);
-            toast.success('凭据已保存，正在重新加载');
+            toast.success(currentLang === 'zh' ? '凭据已保存，正在重新加载' : 'Credentials saved, reloading');
         }
     });
 
@@ -570,6 +628,15 @@
         if (!deleteBtn || !deleteModal) return;
 
         deleteBtn.addEventListener('click', () => {
+            const msg = document.getElementById('delete-message');
+            if (msg) {
+                // 按当前语言拼接，保留 pathid/repo 强调
+                if (currentLang === 'zh') {
+                    msg.innerHTML = '即将删除站点 <strong id="delete-pathid"></strong>（<span id="delete-repo"></span>）。此操作不可撤销，删除后将返回首页。';
+                } else {
+                    msg.innerHTML = 'About to delete site <strong id="delete-pathid"></strong> (<span id="delete-repo"></span>). This cannot be undone; you will be redirected home.';
+                }
+            }
             document.getElementById('delete-pathid').textContent = pathID;
             document.getElementById('delete-repo').textContent = repoName;
             deleteModal.style.display = 'flex';
@@ -579,7 +646,7 @@
 
         deleteConfirm.addEventListener('click', async () => {
             deleteConfirm.disabled = true;
-            deleteConfirm.textContent = '删除中...';
+            deleteConfirm.textContent = currentLang === 'zh' ? '删除中...' : 'Deleting...';
             try {
                 // 管理操作，无需凭据；connect-src 'self' 允许同源 fetch。
                 const resp = await fetch('/api/sites/' + encodeURIComponent(pathID), { method: 'DELETE' });
@@ -600,11 +667,12 @@
     // ---------- 文件树 ----------
     async function loadFileTree() {
         const content = document.getElementById('floating-tree-content');
+        const zh = currentLang === 'zh';
         try {
             const resp = await authFetch('/api/sites/' + pathID + '/tree' + refQuery());
             if (!resp.ok) {
                 allFiles = [];
-                const msg = '加载文件树失败（' + resp.status + '）';
+                const msg = zh ? '加载文件树失败（' + resp.status + '）' : 'Failed to load tree (' + resp.status + ')';
                 if (content) content.innerHTML = '<div class="tree-error">' + msg + '</div>';
                 toast.error(msg);
                 return;
@@ -614,7 +682,7 @@
             renderTree(visibleFiles());
         } catch (err) {
             allFiles = []; // 清空旧分支文件列表，避免 autoOpenDefault 用过期列表发请求
-            const msg = '加载文件树失败: ' + err.message;
+            const msg = zh ? '加载文件树失败: ' + err.message : 'Failed to load tree: ' + err.message;
             if (content) content.innerHTML = '<div class="tree-error">' + msg + '</div>';
             toast.error(msg);
         }
@@ -636,7 +704,7 @@
 
     function renderTree(files) {
         const container = document.getElementById('floating-tree-content');
-        if (!files.length) { container.innerHTML = '<div class="tree-empty">空仓库</div>'; return; }
+        if (!files.length) { container.innerHTML = '<div class="tree-empty">' + (currentLang === 'zh' ? '空仓库' : 'Empty repo') + '</div>'; return; }
         container.innerHTML = renderNode(buildTree(files), 0);
         attachTreeEvents();
     }
@@ -690,7 +758,7 @@
     async function loadFile(path) {
         currentPath = path;
         const area = document.getElementById('content-area');
-        area.innerHTML = '<div class="welcome">加载中...</div>';
+        area.innerHTML = '<div class="welcome">' + (currentLang === 'zh' ? '加载中...' : 'Loading...') + '</div>';
 
         const lower = path.toLowerCase();
         try {
@@ -725,8 +793,12 @@
         const area = document.getElementById('content-area');
         const notice = document.createElement('div');
         notice.className = 'html-notice';
-        notice.innerHTML = '⚠️ HTML 在隔离的沙箱中显示（禁用脚本）。'
-            + '<a href="/' + pathID + '/' + encodeURI(path) + refQuery() + '" target="_blank">在新标签页打开</a>';
+        const noticeText = currentLang === 'zh'
+            ? '⚠️ HTML 在隔离的沙箱中显示（禁用脚本）。'
+            : '⚠️ HTML is shown in a sandboxed iframe (scripts disabled).';
+        const openText = currentLang === 'zh' ? '在新标签页打开' : 'Open in new tab';
+        notice.innerHTML = noticeText
+            + '<a href="/' + pathID + '/' + encodeURI(path) + refQuery() + '" target="_blank">' + openText + '</a>';
         const iframe = document.createElement('iframe');
         iframe.className = 'html-frame';
         iframe.src = '/' + pathID + '/' + encodeURI(path) + refQuery();
@@ -757,14 +829,20 @@
                 const pageContent = lines.slice(start, end).join('\n');
                 const container = document.createElement('div');
                 container.className = 'code-container';
+                const zh = currentLang === 'zh';
+                const linesLabel = zh ? '行' : 'Lines';
+                const pageLabel = zh ? '第' : 'Page';
+                const pageMid = zh ? ' / ' + totalPages + ' 页' : ' / ' + totalPages;
+                const prevLabel = zh ? '上一页' : 'Prev';
+                const nextLabel = zh ? '下一页' : 'Next';
                 container.innerHTML = '<div class="code-header"><span class="code-filename">' + escapeHtml(path)
-                    + ' (行 ' + (start + 1) + '-' + end + ' / ' + lines.length + ')</span></div>'
+                    + ' (' + linesLabel + ' ' + (start + 1) + '-' + end + ' / ' + lines.length + ')</span></div>'
                     + '<div class="code-content"><pre><code>' + pageContent + '</code></pre></div>';
                 const pager = document.createElement('div');
                 pager.className = 'pagination';
-                pager.innerHTML = '<button ' + (p === 0 ? 'disabled' : '') + ' data-p="' + (p - 1) + '">上一页</button>'
-                    + '<span>第 ' + (p + 1) + ' / ' + totalPages + ' 页</span>'
-                    + '<button ' + (p === totalPages - 1 ? 'disabled' : '') + ' data-p="' + (p + 1) + '">下一页</button>';
+                pager.innerHTML = '<button ' + (p === 0 ? 'disabled' : '') + ' data-p="' + (p - 1) + '">' + prevLabel + '</button>'
+                    + '<span>' + pageLabel + ' ' + (p + 1) + pageMid + '</span>'
+                    + '<button ' + (p === totalPages - 1 ? 'disabled' : '') + ' data-p="' + (p + 1) + '">' + nextLabel + '</button>';
                 pager.querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
                     const np = parseInt(b.dataset.p, 10);
                     if (!isNaN(np)) renderPage(np);
@@ -964,6 +1042,8 @@
 
         // ---- 缩为迷你浮岛（带 FLIP） ----
         function toMiniIsland(skipAnim) {
+            // 若当前是停靠态，先退出停靠再最小化（避免 docked 与 minimized class 共存冲突）
+            if (win.classList.contains('docked')) undock();
             // 首次最小化：把浮岛放到右下角附近（若没有保存位置）
             if (pos.dockLeft == null) {
                 const x = window.innerWidth - 56, y = window.innerHeight - 56;
@@ -996,7 +1076,186 @@
                 }
             });
         }
-        minimize.addEventListener('click', e => { e.stopPropagation(); toMiniIsland(); });
+
+        // ---- 停靠态（DevTools 风格：左 / 底 / 右） ----
+        // 与 minimized/snapped 互斥。长按"-"按钮弹停靠菜单选择方向；单击"-"仍是缩为浮岛。
+        const dockSideMenu = document.getElementById('dock-side-menu');
+        const contentArea = document.getElementById('content-area');
+        let longPressFired = false;   // 长按已触发标志：用于阻止本次 click 走 toMiniIsland
+
+        function dockTo(side) {
+            // 清掉浮岛态残留 class 与内联位置（停靠态由 CSS 接管定位）
+            win.classList.remove('minimized', 'snapped', 'snap-left', 'snap-right', 'snap-top', 'snap-bottom');
+            win.style.left = ''; win.style.top = ''; win.style.right = ''; win.style.bottom = ''; win.style.width = ''; win.style.height = '';
+            win.classList.remove('docked-left', 'docked-right', 'docked-bottom');
+            win.classList.add('docked', 'docked-' + side);
+            applyContentInset(side);
+            pos.dockSide = side;
+            savePos({ dockSide: side });
+            hideDockMenu();
+        }
+        function undock(restoreX, restoreY) {
+            win.classList.remove('docked', 'docked-left', 'docked-right', 'docked-bottom');
+            clearContentInset();
+            pos.dockSide = null;
+            savePos({ dockSide: null });
+            // 恢复到浮窗态：优先用拖拽撕下来的位置，否则回上次保存的窗口位置，再否则回 CSS 默认
+            if (restoreX != null) {
+                win.style.left = restoreX + 'px'; win.style.top = restoreY + 'px'; win.style.right = 'auto';
+                savePos({ winLeft: restoreX, winTop: restoreY });
+            } else if (pos.winLeft != null) {
+                win.style.left = pos.winLeft + 'px'; win.style.top = pos.winTop + 'px'; win.style.right = 'auto';
+            } else {
+                win.style.left = ''; win.style.top = ''; win.style.right = '';
+            }
+        }
+        // 停靠时给内容区让位：左/右停靠留侧边 padding，底停靠留底部 padding。
+        // 用 px 直接设，宽度跟着浮窗实际尺寸走（resize 后由 ResizeObserver 同步）。
+        function applyContentInset(side) {
+            if (!contentArea) return;
+            clearContentInset();
+            const w = win.offsetWidth, h = win.offsetHeight;
+            if (side === 'left')   contentArea.style.paddingLeft  = (w + 12) + 'px';
+            if (side === 'right')  contentArea.style.paddingRight = (w + 12) + 'px';
+            if (side === 'bottom') contentArea.style.paddingBottom = (h + 12) + 'px';
+        }
+        function clearContentInset() {
+            if (!contentArea) return;
+            contentArea.style.paddingLeft = '';
+            contentArea.style.paddingRight = '';
+            contentArea.style.paddingBottom = '';
+        }
+
+        // ---- 停靠态拖拽标题栏 → 撕下来变回浮窗 ----
+        // 单独处理，capture 阶段拦截，避免与 makeDraggable（bubble 阶段）冲突。
+        // 第一次移动时 undock 并让浮窗跟手到鼠标位置。
+        let dockTearing = false, tearOX = 0, tearOY = 0, tearFired = false;
+        function startTear(clientX, clientY) {
+            if (!win.classList.contains('docked')) return false;
+            const r = win.getBoundingClientRect();
+            tearOX = clientX - r.left;
+            tearOY = clientY - r.top;
+            tearFired = false;
+            dockTearing = true;
+            return true;
+        }
+        function moveTear(clientX, clientY) {
+            if (!dockTearing) return;
+            if (!tearFired) {
+                // 首次移动：退出停靠，浮窗跳到鼠标下跟手
+                undock(clientX - tearOX, clientY - tearOY);
+                win.classList.add('dragging');
+                tearFired = true;
+            }
+            win.style.left = (clientX - tearOX) + 'px';
+            win.style.top = (clientY - tearOY) + 'px';
+            win.style.right = 'auto'; win.style.bottom = 'auto';
+        }
+        function endTear() {
+            if (!dockTearing) return;
+            dockTearing = false;
+            win.classList.remove('dragging');
+        }
+        titlebar.addEventListener('mousedown', e => {
+            if (e.target.closest('button')) return;       // 点按钮（如"-"）不撕
+            if (startTear(e.clientX, e.clientY)) { e.preventDefault(); e.stopPropagation(); }
+        }, true);
+        document.addEventListener('mousemove', e => moveTear(e.clientX, e.clientY));
+        document.addEventListener('mouseup', endTear);
+        titlebar.addEventListener('touchstart', e => {
+            const t = e.touches[0];
+            if (e.target.closest('button')) return;
+            if (startTear(t.clientX, t.clientY)) { e.stopPropagation(); }
+        }, { capture: true, passive: true });
+        document.addEventListener('touchmove', e => {
+            if (!dockTearing) return;
+            const t = e.touches[0]; moveTear(t.clientX, t.clientY);
+            e.preventDefault();
+        }, { passive: false });
+        document.addEventListener('touchend', endTear);
+        // 停靠态下宽度/高度变化时同步让位（用户拖边缘改尺寸）
+        if (window.ResizeObserver && contentArea) {
+            const dro = new ResizeObserver(() => {
+                if (win.classList.contains('docked')) {
+                    const side = pos.dockSide;
+                    if (side) applyContentInset(side);
+                }
+            });
+            dro.observe(win);
+        }
+
+        // ---- 停靠菜单显隐 + 定位 ----
+        function showDockMenu() {
+            if (!dockSideMenu) return;
+            const r = minimize.getBoundingClientRect();
+            dockSideMenu.style.display = 'flex';
+            // 定位到按钮下方居中
+            const mw = dockSideMenu.offsetWidth;
+            let left = r.left + r.width / 2 - mw / 2;
+            left = Math.max(8, Math.min(left, window.innerWidth - mw - 8));
+            dockSideMenu.style.left = left + 'px';
+            dockSideMenu.style.top = (r.bottom + 6) + 'px';
+        }
+        function hideDockMenu() {
+            if (dockSideMenu) dockSideMenu.style.display = 'none';
+        }
+        if (dockSideMenu) {
+            dockSideMenu.querySelectorAll('.dock-side-btn').forEach(b => {
+                b.addEventListener('click', e => {
+                    e.stopPropagation();
+                    const side = b.dataset.side;
+                    if (side) dockTo(side);
+                });
+            });
+            // 点菜单外关闭
+            document.addEventListener('mousedown', e => {
+                if (dockSideMenu.style.display === 'none') return;
+                if (!dockSideMenu.contains(e.target) && e.target !== minimize) hideDockMenu();
+            });
+        }
+
+        // ---- 长按"-"按钮：500ms 触发停靠菜单（macOS 绿钮同款手感） ----
+        // 单击仍走 toMiniIsland；长按触发后设标志位，mouseup 后的 click 被拦截。
+        let lpTimer = null, lpStartX = 0, lpStartY = 0;
+        function startLongPress(e) {
+            longPressFired = false;
+            lpStartX = e.clientX; lpStartY = e.clientY;
+            lpTimer = setTimeout(() => {
+                lpTimer = null;
+                longPressFired = true;
+                showDockMenu();
+            }, 500);
+        }
+        function cancelLongPress(e) {
+            if (lpTimer) { clearTimeout(lpTimer); lpTimer = null; }
+            // 移动超过 6px 视为拖动，取消长按
+            if (e && (Math.abs(e.clientX - lpStartX) > 6 || Math.abs(e.clientY - lpStartY) > 6)) {
+                if (lpTimer) { clearTimeout(lpTimer); lpTimer = null; }
+            }
+        }
+        minimize.addEventListener('mousedown', e => { startLongPress(e); });
+        minimize.addEventListener('mousemove', e => { cancelLongPress(e); });
+        document.addEventListener('mouseup', () => { if (lpTimer) { clearTimeout(lpTimer); lpTimer = null; } });
+        minimize.addEventListener('click', e => {
+            e.stopPropagation();
+            if (longPressFired) { longPressFired = false; return; } // 长按刚触发过，吞掉本次 click
+            hideDockMenu();
+            if (win.classList.contains('docked')) {
+                undock(); // 停靠态单击"-"：退出停靠回浮窗
+            } else {
+                toMiniIsland();
+            }
+        });
+        // 触屏：长按 500ms
+        minimize.addEventListener('touchstart', e => {
+            const t = e.touches[0];
+            startLongPress({ clientX: t.clientX, clientY: t.clientY });
+        }, { passive: true });
+        minimize.addEventListener('touchmove', e => {
+            const t = e.touches[0];
+            cancelLongPress({ clientX: t.clientX, clientY: t.clientY });
+        }, { passive: true });
+        minimize.addEventListener('touchend', () => { if (lpTimer) { clearTimeout(lpTimer); lpTimer = null; } });
 
         // 应用浮岛位置 + 吸附态 class（位置用 left/top，缩放靠 .snapped 的 transform）
         function applyDockPos(x, y, snap) {
@@ -1097,6 +1356,13 @@
         win.classList.add('show');
         if (startExpanded) {
             // 已有偏好：直接展开，不弹气泡
+            // 恢复上次停靠态（若存在）：展开偏好优先于停靠，但二者可共存——停靠本身也是展开
+            if (pos.dockSide) {
+                win.classList.remove('minimized', 'snapped', 'snap-left', 'snap-right', 'snap-top', 'snap-bottom');
+                win.style.left = ''; win.style.top = ''; win.style.right = ''; win.style.bottom = '';
+                win.classList.add('docked', 'docked-' + pos.dockSide);
+                applyContentInset(pos.dockSide);
+            }
         } else {
             // 默认缩为迷你浮岛（跳过 FLIP，避免与入场动画冲突）
             toMiniIsland(true);
@@ -1191,7 +1457,7 @@
 
         function render() {
             if (!branches.length) {
-                menu.innerHTML = '<div class="branch-menu-empty">无可切换分支</div>';
+                menu.innerHTML = '<div class="branch-menu-empty">' + (currentLang === 'zh' ? '无可切换分支' : 'No branches available') + '</div>';
                 return;
             }
             menu.innerHTML = branches.map(b =>
@@ -1205,12 +1471,14 @@
         }
 
         async function load() {
-            menu.innerHTML = '<div class="branch-menu-loading">加载中...</div>';
+            const zh = currentLang === 'zh';
+            menu.innerHTML = '<div class="branch-menu-loading">' + (zh ? '加载中...' : 'Loading...') + '</div>';
             try {
                 const resp = await authFetch('/api/sites/' + pathID + '/branches');
                 if (!resp.ok) {
-                    menu.innerHTML = '<div class="branch-menu-error">加载分支失败（' + resp.status + '）</div>';
-                    toast.error('加载分支失败（' + resp.status + '）');
+                    const msg = zh ? '加载分支失败（' + resp.status + '）' : 'Failed to load branches (' + resp.status + ')';
+                    menu.innerHTML = '<div class="branch-menu-error">' + msg + '</div>';
+                    toast.error(msg);
                     return;
                 }
                 const data = await resp.json();
@@ -1218,8 +1486,9 @@
                 loaded = true;
                 render();
             } catch (err) {
-                menu.innerHTML = '<div class="branch-menu-error">加载分支失败: ' + escapeHtml(err.message) + '</div>';
-                toast.error('加载分支失败: ' + err.message);
+                const msg = zh ? '加载分支失败: ' + err.message : 'Failed to load branches: ' + err.message;
+                menu.innerHTML = '<div class="branch-menu-error">' + escapeHtml(msg) + '</div>';
+                toast.error(msg);
             }
         }
 
@@ -1267,9 +1536,9 @@
                 if (refreshBtn.classList.contains('spinning')) return; // 防连点
                 refreshBtn.classList.add('spinning');
                 const content = document.getElementById('floating-tree-content');
-                if (content) content.innerHTML = '<div class="tree-loading">刷新中...</div>';
+                if (content) content.innerHTML = '<div class="tree-loading">' + (currentLang === 'zh' ? '刷新中...' : 'Refreshing...') + '</div>';
                 loadFileTree().then(() => {
-                    if (allFiles.length > 0) toast.success('文件树已刷新');
+                    if (allFiles.length > 0) toast.success(currentLang === 'zh' ? '文件树已刷新' : 'Tree refreshed');
                 }).finally(() => {
                     // 动画结束移除 class（animationend 兜底 + 超时兜底）
                     const done = () => refreshBtn.classList.remove('spinning');

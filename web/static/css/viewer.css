@@ -607,6 +607,87 @@ body {
     .dock-bubble { animation: none; }
 }
 
+/* ---------- 停靠方向菜单（长按"-"按钮触发） ----------
+   fixed 定位在按钮下方，三个按钮横排（左 / 底 / 右）。 */
+.dock-side-menu {
+    position: fixed;
+    z-index: 1003;
+    display: flex;
+    gap: 4px;
+    padding: 6px;
+    background: var(--glass-bg);
+    backdrop-filter: blur(var(--glass-blur));
+    -webkit-backdrop-filter: blur(var(--glass-blur));
+    border: 1px solid var(--glass-border);
+    border-radius: var(--r-md);
+    box-shadow: var(--shadow-lg);
+    animation: dock-menu-in 0.18s var(--ease-apple);
+}
+@keyframes dock-menu-in {
+    from { opacity: 0; transform: translateY(-6px) scale(0.96); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+.dock-side-btn {
+    width: 38px; height: 38px;
+    display: flex; align-items: center; justify-content: center;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--secondary);
+    border-radius: var(--r-sm);
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.dock-side-btn svg { width: 20px; height: 20px; }
+.dock-side-btn:hover { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+@media (prefers-reduced-motion: reduce) {
+    .dock-side-menu { animation: none; }
+}
+
+/* ---------- 停靠态：浮窗嵌入视口边缘（DevTools 风格） ----------
+   与 minimized/snapped 互斥；三套样式覆盖 position/尺寸/圆角。
+   停靠时 .content-area 加让位 class（tree-docked-left/right/bottom），
+   padding 由 JS 按浮窗实际宽高设置。 */
+.floating-tree-window.docked {
+    position: fixed;
+    border-radius: 0;
+    box-shadow: var(--shadow-lg);
+    resize: none;            /* 停靠态禁用自由 resize；宽度靠拖边缘改（暂用固定值） */
+    animation: none;         /* 覆盖 win-pop 入场动画 */
+}
+.floating-tree-window.docked .floating-tree-titlebar { cursor: grab; } /* 仍可拖拽撕下来 */
+.floating-tree-window.docked .min-dock { display: none; }
+
+/* 左停靠：贴左缘全高 */
+.floating-tree-window.docked-left {
+    top: 0 !important; bottom: 0 !important; left: 0 !important; right: auto !important;
+    width: 300px !important; max-width: 50vw;
+    height: auto !important; max-height: none;
+    border-top-right-radius: 0; border-bottom-right-radius: 0;
+    border-top-left-radius: 0; border-bottom-left-radius: 0;
+    border-left: none;
+}
+/* 右停靠：贴右缘全高 */
+.floating-tree-window.docked-right {
+    top: 0 !important; bottom: 0 !important; right: 0 !important; left: auto !important;
+    width: 300px !important; max-width: 50vw;
+    height: auto !important; max-height: none;
+    border-top-left-radius: 0; border-bottom-left-radius: 0;
+    border-top-right-radius: 0; border-bottom-right-radius: 0;
+    border-right: none;
+}
+/* 底停靠：贴底部全宽，定高 */
+.floating-tree-window.docked-bottom {
+    left: 0 !important; right: 0 !important; bottom: 0 !important; top: auto !important;
+    width: auto !important; max-width: none;
+    height: 320px !important; max-height: 60vh;
+    border-top-left-radius: 0; border-top-right-radius: 0;
+    border-bottom-left-radius: 0; border-bottom-right-radius: 0;
+    border-bottom: none;
+}
+@media (prefers-reduced-motion: reduce) {
+    .floating-tree-window.docked { transition: none; }
+}
+
 /* 内容区 */
 .floating-tree-content {
     flex: 1;
