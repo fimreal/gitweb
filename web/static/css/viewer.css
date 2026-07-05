@@ -517,6 +517,23 @@ body {
 }
 .floating-tree-titlebar h3 .ft-icon { width: 16px; height: 16px; color: var(--accent); }
 
+/* 停靠切换按钮（标题栏向下箭头，仅 docked 态显示） */
+.dock-switch-btn {
+    margin-left: 2px;
+    padding: 2px;
+    border: none;
+    background: transparent;
+    color: var(--secondary);
+    border-radius: var(--r-sm);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+.dock-switch-btn svg { width: 14px; height: 14px; }
+.dock-switch-btn:hover { background: var(--hover-bg); color: var(--accent); }
+
 .floating-tree-controls { display: flex; gap: 4px; }
 .floating-tree-btn {
     background: transparent;
@@ -651,39 +668,50 @@ body {
     position: fixed;
     border-radius: 0;
     box-shadow: var(--shadow-lg);
-    resize: none;            /* 停靠态禁用自由 resize；宽度靠拖边缘改（暂用固定值） */
-    animation: none;         /* 覆盖 win-pop 入场动画 */
+    animation: none;
 }
-.floating-tree-window.docked .floating-tree-titlebar { cursor: grab; } /* 仍可拖拽撕下来 */
+.floating-tree-window.docked .floating-tree-titlebar { cursor: grab; }
 .floating-tree-window.docked .min-dock { display: none; }
+/* 停靠态标题栏紧凑：去掉多余 padding，避免挤占标题显示 */
+.floating-tree-window.docked .floating-tree-titlebar { padding: 8px 10px 8px 14px; }
+.floating-tree-window.docked .floating-tree-titlebar h3 { font-size: 12.5px; }
 
-/* 左停靠：贴左缘全高 */
+/* 左停靠：贴左缘全高，右侧可拖拽调宽 */
 .floating-tree-window.docked-left {
     top: 0 !important; bottom: 0 !important; left: 0 !important; right: auto !important;
-    width: 300px !important; max-width: 50vw;
+    width: var(--dock-w, 300px); max-width: 60vw; min-width: 180px;
     height: auto !important; max-height: none;
-    border-top-right-radius: 0; border-bottom-right-radius: 0;
-    border-top-left-radius: 0; border-bottom-left-radius: 0;
+    border-radius: 0;
     border-left: none;
+    border-right: 3px solid var(--border);
+    cursor: ew-resize;
 }
-/* 右停靠：贴右缘全高 */
+/* 右停靠：贴右缘全高，左侧可拖拽调宽 */
 .floating-tree-window.docked-right {
     top: 0 !important; bottom: 0 !important; right: 0 !important; left: auto !important;
-    width: 300px !important; max-width: 50vw;
+    width: var(--dock-w, 300px); max-width: 60vw; min-width: 180px;
     height: auto !important; max-height: none;
-    border-top-left-radius: 0; border-bottom-left-radius: 0;
-    border-top-right-radius: 0; border-bottom-right-radius: 0;
+    border-radius: 0;
     border-right: none;
+    border-left: 3px solid var(--border);
+    cursor: ew-resize;
 }
-/* 底停靠：贴底部全宽，定高 */
+/* 底停靠：贴底部全宽，上侧可拖拽调高 */
 .floating-tree-window.docked-bottom {
     left: 0 !important; right: 0 !important; bottom: 0 !important; top: auto !important;
     width: auto !important; max-width: none;
-    height: 320px !important; max-height: 60vh;
-    border-top-left-radius: 0; border-top-right-radius: 0;
-    border-bottom-left-radius: 0; border-bottom-right-radius: 0;
+    height: var(--dock-h, 320px); max-height: 70vh; min-height: 120px;
+    border-radius: 0;
     border-bottom: none;
+    border-top: 3px solid var(--border);
+    cursor: ns-resize;
 }
+/* 停靠态内部元素恢复默认 cursor（只有边缘是 resize） */
+.floating-tree-window.docked .floating-tree-titlebar,
+.floating-tree-window.docked .floating-tree-content,
+.floating-tree-window.docked .floating-tree-btn { cursor: default; }
+.floating-tree-window.docked .floating-tree-titlebar { cursor: grab; }
+.floating-tree-window.docked .floating-tree-titlebar:active { cursor: grabbing; }
 @media (prefers-reduced-motion: reduce) {
     .floating-tree-window.docked { transition: none; }
 }

@@ -16,12 +16,16 @@
                     <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
                 </svg>
                 <span class="ft-title" data-en="Files" data-zh="文件目录">文件目录</span>
+                <!-- 停靠方向切换按钮：仅 docked 态显示，点击弹菜单切左/底/右 -->
+                <button class="dock-switch-btn" id="dock-switch-btn" type="button" title="切换停靠位置" data-en-title="Switch dock side" data-zh-title="切换停靠位置" aria-label="切换停靠位置" style="display:none;">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+                </button>
             </h3>
             <div class="floating-tree-controls">
                 <button class="floating-tree-btn refresh" id="refresh-tree-btn" title="刷新文件树" data-en-title="Refresh tree" data-zh-title="刷新文件树" aria-label="刷新文件树">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
                 </button>
-                <button class="floating-tree-btn minimize" id="minimize-btn" title="单击缩小 · 长按停靠到边缘" data-en-title="Click to minimize · Hold to dock" data-zh-title="单击缩小 · 长按停靠到边缘" aria-label="缩小">
+                <button class="floating-tree-btn minimize" id="minimize-btn" title="单击缩小" data-en-title="Minimize" data-zh-title="单击缩小" aria-label="缩小">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M5 12h14"/></svg>
                 </button>
             </div>
@@ -1084,7 +1088,6 @@
         // 与 minimized/snapped 互斥。长按"-"按钮弹停靠菜单选择方向；单击"-"仍是缩为浮岛。
         const dockSideMenu = document.getElementById('dock-side-menu');
         const contentArea = document.getElementById('content-area');
-        let longPressFired = false;   // 长按已触发标志：用于阻止本次 click 走 toMiniIsland
 
         function dockTo(side) {
             // 清掉浮岛态残留 class 与内联位置（停靠态由 CSS 接管定位）
@@ -1092,16 +1095,22 @@
             win.style.left = ''; win.style.top = ''; win.style.right = ''; win.style.bottom = ''; win.style.width = ''; win.style.height = '';
             win.classList.remove('docked-left', 'docked-right', 'docked-bottom');
             win.classList.add('docked', 'docked-' + side);
+            restoreDockSize();
             applyContentInset(side);
             pos.dockSide = side;
             savePos({ dockSide: side });
             hideDockMenu();
+            // 显示标题栏切换按钮
+            if (dockSwitchBtn) dockSwitchBtn.style.display = 'flex';
         }
         function undock(restoreX, restoreY) {
             win.classList.remove('docked', 'docked-left', 'docked-right', 'docked-bottom');
             clearContentInset();
             pos.dockSide = null;
             savePos({ dockSide: null });
+            // 隐藏标题栏切换按钮
+            if (dockSwitchBtn) dockSwitchBtn.style.display = 'none';
+            hideDockMenu();
             // 恢复到浮窗态：优先用拖拽撕下来的位置，否则回上次保存的窗口位置，再否则回 CSS 默认
             if (restoreX != null) {
                 win.style.left = restoreX + 'px'; win.style.top = restoreY + 'px'; win.style.right = 'auto';
@@ -1127,6 +1136,70 @@
             contentArea.style.paddingLeft = '';
             contentArea.style.paddingRight = '';
             contentArea.style.paddingBottom = '';
+        }
+
+        // ---- 停靠态拖边缘改宽/高 ----
+        // 鼠标靠近停靠浮窗的可拖拽边缘（8px 检测区）时启动 resize。
+        // 左停靠拖右边、右停靠拖左边、底停靠拖上边。
+        // 注意：cursor 仅在 3px border 上显示 ew/ns-resize，但检测区延伸到 8px 更易抓取。
+        let resizing = false, resizeStart = 0, resizeStartSize = 0, resizeSide = null;
+        function startResize(e) {
+            if (!win.classList.contains('docked')) return;
+            const side = pos.dockSide;
+            const r = win.getBoundingClientRect();
+            const EDGE = 8; // 边缘可拖拽区域宽度
+            let canResize = false;
+            if (side === 'left' && Math.abs(e.clientX - r.right) < EDGE) { canResize = true; resizeSide = 'ew'; resizeStart = e.clientX; resizeStartSize = r.width; }
+            else if (side === 'right' && Math.abs(e.clientX - r.left) < EDGE) { canResize = true; resizeSide = 'ew'; resizeStart = e.clientX; resizeStartSize = r.width; }
+            else if (side === 'bottom' && Math.abs(e.clientY - r.top) < EDGE) { canResize = true; resizeSide = 'ns'; resizeStart = e.clientY; resizeStartSize = r.height; }
+            if (!canResize) return;
+            resizing = true;
+            e.preventDefault();
+            e.stopPropagation();
+        }
+        win.addEventListener('mousedown', e => { startResize(e); }, true);
+        document.addEventListener('mousemove', e => {
+            if (!resizing) return;
+            const side = pos.dockSide;
+            if (resizeSide === 'ew') {
+                let delta;
+                if (side === 'left') delta = e.clientX - resizeStart;
+                else delta = resizeStart - e.clientX; // right: 左边线往左拖=变宽
+                const w = Math.max(180, Math.min(resizeStartSize + delta, window.innerWidth * 0.6));
+                win.style.setProperty('--dock-w', w + 'px');
+                applyContentInset(side);
+            } else if (resizeSide === 'ns') {
+                const delta = resizeStart - e.clientY; // 底停靠：上边线往上拖=变高
+                const h = Math.max(120, Math.min(resizeStartSize + delta, window.innerHeight * 0.7));
+                win.style.setProperty('--dock-h', h + 'px');
+                applyContentInset(side);
+            }
+        });
+        document.addEventListener('mouseup', () => {
+            if (!resizing) return;
+            resizing = false;
+            // 持久化尺寸
+            const side = pos.dockSide;
+            if (side === 'left' || side === 'right') savePos({ dockW: win.offsetWidth });
+            else if (side === 'bottom') savePos({ dockH: win.offsetHeight });
+        });
+        // 触屏 resize
+        win.addEventListener('touchstart', e => {
+            if (!win.classList.contains('docked')) return;
+            const t = e.touches[0];
+            startResize({ clientX: t.clientX, clientY: t.clientY, preventDefault: () => e.preventDefault(), stopPropagation: () => e.stopPropagation() });
+        }, { capture: true, passive: true });
+        document.addEventListener('touchmove', e => {
+            if (!resizing) return;
+            const t = e.touches[0];
+            document.dispatchEvent(new MouseEvent('mousemove', { clientX: t.clientX, clientY: t.clientY }));
+            e.preventDefault();
+        }, { passive: false });
+
+        // 恢复保存的停靠尺寸
+        function restoreDockSize() {
+            if (pos.dockW != null) win.style.setProperty('--dock-w', pos.dockW + 'px');
+            if (pos.dockH != null) win.style.setProperty('--dock-h', pos.dockH + 'px');
         }
 
         // ---- 停靠态拖拽标题栏 → 撕下来变回浮窗 ----
@@ -1188,11 +1261,11 @@
         }
 
         // ---- 停靠菜单显隐 + 定位 ----
-        function showDockMenu() {
+        const dockSwitchBtn = document.getElementById('dock-switch-btn');
+        function showDockMenu(anchorEl) {
             if (!dockSideMenu) return;
-            const r = minimize.getBoundingClientRect();
+            const r = (anchorEl || minimize).getBoundingClientRect();
             dockSideMenu.style.display = 'flex';
-            // 定位到按钮下方居中
             const mw = dockSideMenu.offsetWidth;
             let left = r.left + r.width / 2 - mw / 2;
             left = Math.max(8, Math.min(left, window.innerWidth - mw - 8));
@@ -1210,55 +1283,48 @@
                     if (side) dockTo(side);
                 });
             });
-            // 点菜单外关闭
             document.addEventListener('mousedown', e => {
                 if (dockSideMenu.style.display === 'none') return;
-                if (!dockSideMenu.contains(e.target) && e.target !== minimize) hideDockMenu();
+                if (!dockSideMenu.contains(e.target) && e.target !== dockSwitchBtn && e.target !== minimize) hideDockMenu();
+            });
+        }
+        // 停靠切换按钮（标题栏向下箭头）：点击弹停靠菜单
+        if (dockSwitchBtn) {
+            dockSwitchBtn.addEventListener('click', e => {
+                e.stopPropagation();
+                if (dockSideMenu.style.display === 'none') showDockMenu(dockSwitchBtn);
+                else hideDockMenu();
             });
         }
 
-        // ---- 长按"-"按钮：500ms 触发停靠菜单（macOS 绿钮同款手感） ----
-        // 单击仍走 toMiniIsland；长按触发后设标志位，mouseup 后的 click 被拦截。
-        let lpTimer = null, lpStartX = 0, lpStartY = 0;
-        function startLongPress(e) {
-            longPressFired = false;
-            lpStartX = e.clientX; lpStartY = e.clientY;
-            lpTimer = setTimeout(() => {
-                lpTimer = null;
-                longPressFired = true;
-                showDockMenu();
-            }, 500);
-        }
-        function cancelLongPress(e) {
-            if (lpTimer) { clearTimeout(lpTimer); lpTimer = null; }
-            // 移动超过 6px 视为拖动，取消长按
-            if (e && (Math.abs(e.clientX - lpStartX) > 6 || Math.abs(e.clientY - lpStartY) > 6)) {
-                if (lpTimer) { clearTimeout(lpTimer); lpTimer = null; }
+        // ---- 双击标题栏 → 停靠到左侧（默认）；停靠态双击 → 退出停靠 ----
+        // 单击标题栏仍走 makeDraggable 的拖拽逻辑（不冲突：dblclick 是独立事件）。
+        let lastTitleClick = 0;
+        titlebar.addEventListener('click', e => {
+            if (e.target.closest('button')) return; // 点按钮不算
+            const now = Date.now();
+            if (now - lastTitleClick < 350) {
+                // 双击
+                e.preventDefault();
+                e.stopPropagation();
+                lastTitleClick = 0;
+                if (win.classList.contains('docked')) undock();
+                else dockTo('left');
+            } else {
+                lastTitleClick = now;
             }
-        }
-        minimize.addEventListener('mousedown', e => { startLongPress(e); });
-        minimize.addEventListener('mousemove', e => { cancelLongPress(e); });
-        document.addEventListener('mouseup', () => { if (lpTimer) { clearTimeout(lpTimer); lpTimer = null; } });
+        });
+
+        // minimize 按钮：单击缩小（浮窗态）/ 退出停靠（停靠态）
         minimize.addEventListener('click', e => {
             e.stopPropagation();
-            if (longPressFired) { longPressFired = false; return; } // 长按刚触发过，吞掉本次 click
             hideDockMenu();
             if (win.classList.contains('docked')) {
-                undock(); // 停靠态单击"-"：退出停靠回浮窗
+                undock();
             } else {
                 toMiniIsland();
             }
         });
-        // 触屏：长按 500ms
-        minimize.addEventListener('touchstart', e => {
-            const t = e.touches[0];
-            startLongPress({ clientX: t.clientX, clientY: t.clientY });
-        }, { passive: true });
-        minimize.addEventListener('touchmove', e => {
-            const t = e.touches[0];
-            cancelLongPress({ clientX: t.clientX, clientY: t.clientY });
-        }, { passive: true });
-        minimize.addEventListener('touchend', () => { if (lpTimer) { clearTimeout(lpTimer); lpTimer = null; } });
 
         // 应用浮岛位置 + 吸附态 class（位置用 left/top，缩放靠 .snapped 的 transform）
         function applyDockPos(x, y, snap) {
@@ -1365,7 +1431,9 @@
                 win.classList.remove('minimized', 'snapped', 'snap-left', 'snap-right', 'snap-top', 'snap-bottom');
                 win.style.left = ''; win.style.top = ''; win.style.right = ''; win.style.bottom = '';
                 win.classList.add('docked', 'docked-' + pos.dockSide);
+                restoreDockSize();
                 applyContentInset(pos.dockSide);
+                if (dockSwitchBtn) dockSwitchBtn.style.display = 'flex';
             }
         } else {
             // 默认缩为迷你浮岛（跳过 FLIP，避免与入场动画冲突）
