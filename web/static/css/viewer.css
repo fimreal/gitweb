@@ -1005,6 +1005,16 @@ body {
     margin: 0;
 }
 .auth-save-row:hover { color: var(--fg); }
+.auth-error {
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    color: #dc2626;
+    padding: 8px 12px;
+    border-radius: var(--r-sm);
+    font-size: 13px;
+    margin-bottom: 12px;
+    line-height: 1.4;
+}
 .auth-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px; }
 .auth-actions button {
     padding: 8px 16px;
