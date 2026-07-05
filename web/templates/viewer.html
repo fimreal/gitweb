@@ -21,7 +21,7 @@
                 <button class="floating-tree-btn refresh" id="refresh-tree-btn" title="刷新文件树" data-en-title="Refresh tree" data-zh-title="刷新文件树" aria-label="刷新文件树">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
                 </button>
-                <button class="floating-tree-btn minimize" id="minimize-btn" title="缩为迷你浮岛" data-en-title="Minimize to dock" data-zh-title="缩为迷你浮岛" aria-label="缩小">
+                <button class="floating-tree-btn minimize" id="minimize-btn" title="单击缩小 · 长按停靠到边缘" data-en-title="Click to minimize · Hold to dock" data-zh-title="单击缩小 · 长按停靠到边缘" aria-label="缩小">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M5 12h14"/></svg>
                 </button>
             </div>
@@ -85,7 +85,9 @@
                     </button>
                     <div class="settings-dropdown" id="settings-dropdown" role="menu">
                         <button class="settings-item" id="theme-toggle-viewer" role="menuitem" type="button">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+                            <!-- 双图标：亮色=太阳(si-icon-on)，暗色=月亮(si-icon-off)。.checked=暗色 -->
+                            <svg class="si-icon-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+                            <svg class="si-icon-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
                             <span class="si-label" data-en="Light" data-zh="亮色">亮色</span>
                         </button>
                         <button class="settings-item" id="lang-toggle-viewer" role="menuitem" type="button" aria-pressed="false">
@@ -223,12 +225,14 @@
 
     function applyTheme(theme) {
         document.documentElement.setAttribute('data-theme', theme);
-        const label = document.querySelector('#theme-toggle-viewer .si-label');
+        const btn = document.getElementById('theme-toggle-viewer');
+        if (!btn) return;
+        // 图标 + 文案 = 当前状态：dark → 月亮 + "暗色"；light → 太阳 + "亮色"
+        btn.classList.toggle('checked', theme === 'dark');
+        const label = btn.querySelector('.si-label');
         if (label) {
-            // 按钮显示「将要切换到的目标」：当前 dark → 显示「亮色」
-            const toLight = theme === 'dark';
-            const en = toLight ? 'Light' : 'Dark';
-            const zh = toLight ? '亮色' : '暗色';
+            const en = theme === 'dark' ? 'Dark' : 'Light';
+            const zh = theme === 'dark' ? '暗色' : '亮色';
             label.textContent = currentLang === 'zh' ? zh : en;
             label.setAttribute('data-en', en);
             label.setAttribute('data-zh', zh);
@@ -284,8 +288,8 @@
         if (!btn) return;
         const label = btn.querySelector('.si-label');
         if (label) {
-            // 显示「将要切换到的目标语言」：当前 zh → 「English」，当前 en → 「中文」
-            label.textContent = currentLang === 'zh' ? 'English' : '中文';
+            // 显示当前语言名：zh → 「中文」，en → 「English」
+            label.textContent = currentLang === 'zh' ? '中文' : 'English';
         }
         btn.setAttribute('aria-pressed', currentLang === 'zh' ? 'true' : 'false');
     }
@@ -355,13 +359,11 @@
         if (!btn) return;
         btn.classList.toggle('checked', showHidden);
         btn.setAttribute('aria-pressed', showHidden ? 'true' : 'false');
-        // 文案随状态切换（与主题切换同款「显示将要切换到的目标」）：
-        //   隐藏中(showHidden=false) → 「显示隐藏文件」
-        //   显示中(showHidden=true)  → 「隐藏文件」
+        // 文案 = 当前状态：隐藏中 → 「隐藏」，显示中 → 「显示」
         const label = btn.querySelector('.si-label');
         if (label) {
-            const en = showHidden ? 'Hide hidden files' : 'Show hidden files';
-            const zh = showHidden ? '隐藏文件' : '显示隐藏文件';
+            const en = showHidden ? 'Shown' : 'Hidden';
+            const zh = showHidden ? '显示' : '隐藏';
             label.textContent = currentLang === 'zh' ? zh : en;
             label.setAttribute('data-en', en);
             label.setAttribute('data-zh', zh);
@@ -389,11 +391,11 @@
         if (!btn) return;
         btn.classList.toggle('checked', showLineNumbers);
         btn.setAttribute('aria-pressed', showLineNumbers ? 'true' : 'false');
-        // 文案=点击目标：显示中 → 「隐藏行号」、隐藏中 → 「显示行号」
+        // 文案 = 当前状态：有行号 → 「行号」，无行号 → 「无行号」
         const label = btn.querySelector('.si-label');
         if (label) {
-            const en = showLineNumbers ? 'Hide line numbers' : 'Show line numbers';
-            const zh = showLineNumbers ? '隐藏行号' : '显示行号';
+            const en = showLineNumbers ? 'Line numbers' : 'No line numbers';
+            const zh = showLineNumbers ? '行号' : '无行号';
             label.textContent = currentLang === 'zh' ? zh : en;
             label.setAttribute('data-en', en);
             label.setAttribute('data-zh', zh);
@@ -919,11 +921,10 @@
             el.style.left = x + 'px';
             el.style.top = y + 'px';
             el.style.right = 'auto'; el.style.bottom = 'auto';
-            // 计算到四边的最近距离（以元素中心为基准）
-            const cx = x + w / 2, cy = y + h / 2;
+            // 计算元素边缘到视口边缘的距离（允许负数=超出）
             const edges = {
-                left: cx, right: window.innerWidth - cx,
-                top: cy, bottom: window.innerHeight - cy
+                left: x, right: window.innerWidth - (x + w),
+                top: y, bottom: window.innerHeight - (y + h)
             };
             let edge = 'left', dist = edges.left;
             for (const k in edges) { if (edges[k] < dist) { dist = edges[k]; edge = k; } }
@@ -965,7 +966,7 @@
         if (!win) return;
 
         const pos = loadPos();
-        const SNAP_DIST = 44;        // 离边小于该值即吸附（像素）
+        const SNAP_DIST = 12;        // 元素边缘离视口边 ≤ 此值才吸附（像素）
         const DOCK_SIZE = 48;        // 迷你浮岛逻辑尺寸（与 CSS 一致；视觉缩放靠 transform）
         const EASE = 'cubic-bezier(0.16, 1, 0.3, 1)';      // 苹果大形变缓动
         const EASE_SNAP = 'cubic-bezier(0.32, 0.72, 0, 1)'; // 吸附滑入缓动
@@ -1266,15 +1267,16 @@
         }
 
         // ---- 浮岛拖动：贴边吸附 + 半隐入 ----
-        // 拖动中 left/top 即时跟手（不在 transition 列表），transform(scale) 保留过渡 →
-        // 靠近/离开吸附区时缩小是柔和的，不跳变。松手若吸附则滑入半隐入位（带缓动）。
+        // 拖动中只跟手移动，不加 snapped class（避免 scale/圆角突变）；
+        // 松手时判断是否贴近边缘，是则平滑滑入半隐入位（带缓动 + scale + 圆角过渡）。
         const dockDrag = makeDraggable(win, minDock, {
             allowOverflow: true,
+            onStart: () => {
+                // 拖动开始：脱离吸附态，恢复全尺寸（用户把浮岛"拿起来"了）
+                win.classList.remove('snapped', 'snap-left', 'snap-right', 'snap-top', 'snap-bottom');
+            },
             onMove: (x, y, edge, dist) => {
-                const willSnap = dist <= SNAP_DIST;
-                win.classList.toggle('snapped', willSnap);
-                win.classList.remove('snap-left', 'snap-right', 'snap-top', 'snap-bottom');
-                if (willSnap) win.classList.add('snap-' + edge);
+                // 纯跟手，不预览吸附态（松手才吸附）
                 win.style.left = x + 'px'; win.style.top = y + 'px';
             },
             onEnd: (moved, x, y, edge, dist) => {
