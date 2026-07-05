@@ -44,6 +44,7 @@
     }
 
     function applyLang(lang) {
+        document.documentElement.setAttribute('lang', lang === 'zh' ? 'zh-CN' : 'en');
         document.querySelectorAll('[data-en][data-zh]').forEach(el => {
             const text = lang === 'zh' ? el.getAttribute('data-zh') : el.getAttribute('data-en');
             if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {

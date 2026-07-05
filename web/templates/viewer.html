@@ -261,6 +261,7 @@
     }
 
     function applyLang(lang) {
+        document.documentElement.setAttribute('lang', lang === 'zh' ? 'zh-CN' : 'en');
         document.querySelectorAll('[data-en][data-zh]').forEach(el => {
             const text = lang === 'zh' ? el.getAttribute('data-zh') : el.getAttribute('data-en');
             if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') el.placeholder = text;
@@ -656,13 +657,14 @@
                     window.location.href = '/'; // 删除成功，回首页
                     return;
                 }
+                const zh = currentLang === 'zh';
                 const data = await resp.json().catch(() => ({}));
-                toast.error('删除失败: ' + (data.error || resp.status));
+                toast.error(zh ? '删除失败: ' + (data.error || resp.status) : 'Delete failed: ' + (data.error || resp.status));
             } catch (err) {
-                toast.error('删除失败: ' + err.message);
+                toast.error(zh ? '删除失败: ' + err.message : 'Delete failed: ' + err.message);
             }
             deleteConfirm.disabled = false;
-            deleteConfirm.textContent = '删除';
+            deleteConfirm.textContent = currentLang === 'zh' ? '删除' : 'Delete';
         });
     })();
 
@@ -777,7 +779,7 @@
             // md/txt/代码：后端返回 HTML 片段，前端注入。长内容前端分页。
             const resp = await authFetch('/' + pathID + '/' + encodeURI(path) + refQuery());
             if (!resp.ok) {
-                const msg = '加载失败（' + resp.status + '）';
+                const msg = currentLang === 'zh' ? '加载失败（' + resp.status + '）' : 'Failed to load (' + resp.status + ')';
                 area.innerHTML = '<div class="error">' + msg + '</div>';
                 toast.error(msg);
                 return;
@@ -785,7 +787,7 @@
             const html = await resp.text();
             renderTextWithPagination(area, path, html);
         } catch (err) {
-            const msg = '加载失败: ' + err.message;
+            const msg = currentLang === 'zh' ? '加载失败: ' + err.message : 'Failed to load: ' + err.message;
             area.innerHTML = '<div class="error">' + msg + '</div>';
             toast.error(msg);
         }
@@ -1501,9 +1503,9 @@
             close();
             // 重拉文件树；清空当前文件内容（旧分支的文件路径可能不存在）
             const area = document.getElementById('content-area');
-            if (area) area.innerHTML = '<div class="welcome">切换到分支 ' + escapeHtml(ref) + '...</div>';
+            if (area) area.innerHTML = '<div class="welcome">' + (currentLang === 'zh' ? '切换到分支 ' : 'Switching to ') + escapeHtml(ref) + '...</div>';
             loadFileTree().then(autoOpenDefault);
-            toast.info('已切换到分支 ' + ref);
+            toast.info(currentLang === 'zh' ? '已切换到分支 ' + ref : 'Switched to ' + ref);
         }
 
         function openMenu() {
