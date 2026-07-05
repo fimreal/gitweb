@@ -568,6 +568,9 @@
             const saved = JSON.parse(localStorage.getItem(STORAGE_KEY_LOCAL));
             if (saved && saved.expiresAt && Date.now() < saved.expiresAt) {
                 sessionStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
+                // 恢复持久凭据时也补一份 cookie
+                var cookieVal = btoa(unescape(encodeURIComponent(JSON.stringify(saved))));
+                document.cookie = 'gitweb_repo_auth_' + pathID + '=' + cookieVal + '; path=/; max-age=' + (SAVE_DAYS * 86400) + '; SameSite=Lax';
                 return true;
             }
             if (saved) localStorage.removeItem(STORAGE_KEY_LOCAL);
@@ -577,6 +580,12 @@
     // persist=true → 存 localStorage 并带 7 天过期；false → 仅 sessionStorage 并清掉旧持久记录
     function storeAuth(auth, persist) {
         sessionStorage.setItem(STORAGE_KEY, JSON.stringify(auth));
+        // 同步写一份 base64 cookie 给后端兜底用：浏览器导航（地址栏、<a>、<img>、iframe src）
+        // 不会带 Authorization 头，但会带同源 cookie，后端可从 cookie 恢复 auth。
+        var cookieName = 'gitweb_repo_auth_' + pathID;
+        var cookieVal = btoa(unescape(encodeURIComponent(JSON.stringify(auth))));
+        var maxAge = persist ? (SAVE_DAYS * 86400) : (4 * 3600); // 持久 7 天，会话 4 小时
+        document.cookie = cookieName + '=' + cookieVal + '; path=/; max-age=' + maxAge + '; SameSite=Lax';
         if (persist) {
             auth.expiresAt = Date.now() + SAVE_DAYS * 86400000;
             localStorage.setItem(STORAGE_KEY_LOCAL, JSON.stringify(auth));
@@ -584,10 +593,11 @@
             localStorage.removeItem(STORAGE_KEY_LOCAL);
         }
     }
-    // 清除全部凭据（持久 + 会话），用于保存的凭据失效时
+    // 清除全部凭据（持久 + 会话 + cookie），用于保存的凭据失效时
     function clearAllAuth() {
         localStorage.removeItem(STORAGE_KEY_LOCAL);
         sessionStorage.removeItem(STORAGE_KEY);
+        document.cookie = 'gitweb_repo_auth_' + pathID + '=; path=/; max-age=0';
     }
     // 检查是否有有效的持久凭据（用于预填勾选框 & 站点信息展示）
     function getSavedAuthInfo() {
@@ -627,6 +637,8 @@
         while (resp.status === 401) {
             const prevAuth = getStoredAuth();
             sessionStorage.removeItem(STORAGE_KEY);
+            // 后端若失败，也清掉兜底 cookie，避免持续误导下次导航请求
+            document.cookie = 'gitweb_repo_auth_' + pathID + '=; path=/; max-age=0';
             authFailed = !!prevAuth;
             lastFailedType = prevAuth ? prevAuth.type : null;
             const auth = await promptAuth();
@@ -910,22 +922,42 @@
 
     function renderHTMLInIframe(path) {
         const area = document.getElementById('content-area');
-        const notice = document.createElement('div');
-        notice.className = 'html-notice';
-        const noticeText = currentLang === 'zh'
-            ? '⚠️ HTML 在隔离的沙箱中显示（禁用脚本）。'
-            : '⚠️ HTML is shown in a sandboxed iframe (scripts disabled).';
+        area.innerHTML = '<div class="welcome">' + (currentLang === 'zh' ? '加载中...' : 'Loading...') + '</div>';
+
+        const fileURL = '/' + pathID + '/' + encodeURI(path) + refQuery();
         const openText = currentLang === 'zh' ? '在新标签页打开' : 'Open in new tab';
-        notice.innerHTML = noticeText
-            + '<a href="/' + pathID + '/' + encodeURI(path) + refQuery() + '" target="_blank">' + openText + '</a>';
-        const iframe = document.createElement('iframe');
-        iframe.className = 'html-frame';
-        iframe.src = '/' + pathID + '/' + encodeURI(path) + refQuery();
-        // sandbox 不加 allow-scripts：防不可信仓库的恶意脚本执行
-        iframe.setAttribute('sandbox', 'allow-same-origin');
-        area.innerHTML = '';
-        area.appendChild(notice);
-        area.appendChild(iframe);
+
+        authFetch(fileURL).then(async resp => {
+            if (!resp.ok) {
+                const msg = currentLang === 'zh' ? '加载失败（' + resp.status + '）' : 'Failed to load (' + resp.status + ')';
+                area.innerHTML = '<div class="error">' + msg + '</div>';
+                toast.error(msg);
+                return;
+            }
+            const html = await resp.text();
+
+            const notice = document.createElement('div');
+            notice.className = 'html-notice';
+            const noticeText = currentLang === 'zh'
+                ? '⚠️ HTML 在隔离的沙箱中显示（禁用脚本）。'
+                : '⚠️ HTML is shown in a sandboxed iframe (scripts disabled).';
+            notice.innerHTML = noticeText
+                + '<a href="' + fileURL + '" target="_blank">' + openText + '</a>';
+
+            const iframe = document.createElement('iframe');
+            iframe.className = 'html-frame';
+            // 用 srcdoc 注入内容：这样鉴权头只走主页面 fetch，不依赖 iframe 自身请求。
+            // 同时 sandbox 不加 allow-scripts，防止不可信仓库的恶意脚本逃逸。
+            iframe.setAttribute('sandbox', 'allow-same-origin');
+            iframe.srcdoc = html;
+            area.innerHTML = '';
+            area.appendChild(notice);
+            area.appendChild(iframe);
+        }).catch(err => {
+            const msg = currentLang === 'zh' ? '加载失败: ' + err.message : 'Failed to load: ' + err.message;
+            area.innerHTML = '<div class="error">' + msg + '</div>';
+            toast.error(msg);
+        });
     }
 
     // 前端分页：按渲染片段的行数切，每页 maxLines 行。

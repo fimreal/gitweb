@@ -1,5 +1,9 @@
 base_url: http://localhost:8080
 listen: ":8080"
+# 可选访问密码（密钥）：设置后所有页面均需登录才能访问。
+# 可在启动参数 -password 覆盖；留空或不设置 = 公开访问（默认行为）。
+# password: "your-secret-password"
+
 # No admin_token: this is a public service. Registration is open.
 # Abuse is bounded by SSRF protection, file-size limits, and cache/timeout caps.
 
