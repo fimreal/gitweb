@@ -147,7 +147,8 @@
     <div class="auth-modal" id="auth-modal" style="display:none;">
         <div class="auth-modal-card">
             <h2 data-en="Authentication required" data-zh="该仓库需要鉴权">该仓库需要鉴权</h2>
-            <p data-en="Credentials stay in your browser only, never uploaded to the server. Default: current tab only. Check “Save to browser” to keep on this device for 7 days." data-zh="凭据仅保存在浏览器，不会上传服务器。默认仅当前标签页有效；勾选「保存到浏览器」可在此设备保留 7 天。">凭据仅保存在浏览器，不会上传服务器。默认仅当前标签页有效；勾选「保存到浏览器」可在此设备保留 7 天。</p>
+            <p data-en="Credentials stay in your browser only, never uploaded to the server. Default: current tab only. Check 'Save to browser' to keep on this device for 7 days." data-zh="凭据仅保存在浏览器，不会上传服务器。默认仅当前标签页有效；勾选「保存到浏览器」可在此设备保留 7 天。">凭据仅保存在浏览器，不会上传服务器。默认仅当前标签页有效；勾选「保存到浏览器」可在此设备保留 7 天。</p>
+            <div id="auth-error" class="auth-error" style="display:none;"></div>
             <div class="auth-form">
                 <select id="auth-type">
                     <option value="token" data-en="Token" data-zh="Token">Token</option>
@@ -228,6 +229,7 @@
     let currentRef = '{{ .Ref }}'; // 临时分支：切换分支时改写，不持久化
     let authResolve = null; // 凭据弹窗的 resolve
     let authFromButton = false; // 凭据弹窗由「凭据」按钮触发（提交后需手动重载文件树）
+    let authFailed = false; // 上次凭据是否无效（用于弹窗显示错误提示）
 
     // ---------- 主题：读 localStorage + 系统偏好，与首页共用 key ----------
     let currentLang = localStorage.getItem('lang') ||
@@ -602,26 +604,43 @@
         return {};
     }
 
-    // 带鉴权的 fetch：401 时弹窗要凭据，输入后重试一次。
+    // 带鉴权的 fetch：401 时弹窗要凭据，输入后重试。循环直到成功或用户取消。
     async function authFetch(url, opts) {
         opts = opts || {};
         opts.headers = Object.assign({}, opts.headers || {}, authHeader());
         let resp = await fetch(url, opts);
-        if (resp.status === 401) {
-            // 保存的凭据失效 → 清掉持久记录，避免循环用过期凭据
-            if (getSavedAuthInfo().has) clearAllAuth();
-            await promptAuth();
+        while (resp.status === 401) {
+            const hadAuth = !!getStoredAuth();
+            // 清掉失效凭据（持久 + 会话），避免循环用旧凭据
+            clearAllAuth();
+            // 上次有凭据还 401 → 说明凭据无效，弹窗时显示错误提示
+            authFailed = hadAuth;
+            const auth = await promptAuth();
+            if (!auth) break; // 用户取消 → 返回 401
+            authFailed = false;
             opts.headers = Object.assign({}, opts.headers || {}, authHeader());
             resp = await fetch(url, opts);
         }
         return resp;
     }
 
-    // 弹出凭据输入框，返回 Promise（用户确认后 resolve）
+    // 弹出凭据输入框，返回 Promise（用户确认后 resolve auth 对象，取消则 resolve null）
     function promptAuth() {
         if (authResolve) return authResolve; // 已有弹窗
         const modal = document.getElementById('auth-modal');
         modal.style.display = 'flex';
+        // 根据 authFailed 显示/隐藏错误提示
+        const errEl = document.getElementById('auth-error');
+        if (errEl) {
+            if (authFailed) {
+                errEl.textContent = currentLang === 'zh'
+                    ? '上次输入的凭据无效，请重新输入'
+                    : 'Previous credentials were invalid, please try again';
+                errEl.style.display = 'block';
+            } else {
+                errEl.style.display = 'none';
+            }
+        }
         return new Promise(resolve => {
             authResolve = resolve;
         });
@@ -680,6 +699,7 @@
                 }
             }
             authFromButton = true;
+            authFailed = false; // 按钮触发是全新输入，不显示"上次无效"提示
             promptAuth();
         });
     }
