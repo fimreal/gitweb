@@ -147,7 +147,7 @@
     <div class="auth-modal" id="auth-modal" style="display:none;">
         <div class="auth-modal-card">
             <h2 data-en="Authentication required" data-zh="该仓库需要鉴权">该仓库需要鉴权</h2>
-            <p data-en="This repository is not publicly accessible. Enter credentials to continue. Credentials are stored only in this browser tab (sessionStorage), cleared on close, and never sent to the server." data-zh="此 Git 仓库无公开访问权限，请输入凭据。凭据仅保存在当前浏览器标签页（sessionStorage），关闭即清除，不会上传服务器存储。">此 Git 仓库无公开访问权限，请输入凭据。凭据仅保存在当前浏览器标签页（sessionStorage），关闭即清除，不会上传服务器存储。</p>
+            <p data-en="Credentials stay in your browser only, never uploaded to the server. Default: current tab only. Check “Save to browser” to keep on this device for 7 days." data-zh="凭据仅保存在浏览器，不会上传服务器。默认仅当前标签页有效；勾选「保存到浏览器」可在此设备保留 7 天。">凭据仅保存在浏览器，不会上传服务器。默认仅当前标签页有效；勾选「保存到浏览器」可在此设备保留 7 天。</p>
             <div class="auth-form">
                 <select id="auth-type">
                     <option value="token" data-en="Token" data-zh="Token">Token</option>
@@ -156,6 +156,10 @@
                 <input type="password" id="auth-token" placeholder="Token" data-en-placeholder="Token" data-zh-placeholder="Token" autocomplete="off">
                 <input type="text" id="auth-username" placeholder="用户名" data-en-placeholder="Username" data-zh-placeholder="用户名" autocomplete="off" style="display:none;">
                 <input type="password" id="auth-password" placeholder="密码" data-en-placeholder="Password" data-zh-placeholder="密码" autocomplete="off" style="display:none;">
+                <label class="auth-save-row">
+                    <input type="checkbox" id="auth-save-local">
+                    <span data-en="Save to this browser (7 days)" data-zh="保存到浏览器（7 天）">保存到浏览器（7 天）</span>
+                </label>
                 <div class="auth-actions">
                     <button id="auth-cancel" data-en="Cancel" data-zh="取消">取消</button>
                     <button id="auth-submit" class="primary" data-en="Confirm" data-zh="确认">确认</button>
@@ -217,6 +221,8 @@
     const repoName = '{{ .RepoName }}';
     const gitURL = '{{ .GitURL }}';
     const STORAGE_KEY = 'gitweb_auth_' + pathID;
+    const STORAGE_KEY_LOCAL = 'gitweb_auth_saved_' + pathID;
+    const SAVE_DAYS = 7;
     let allFiles = [];
     let currentPath = '';
     let currentRef = '{{ .Ref }}'; // 临时分支：切换分支时改写，不持久化
@@ -505,10 +511,20 @@
             document.getElementById('info-giturl').textContent = siteInfo.gitUrl || '—';
             document.getElementById('info-provider').textContent = siteInfo.provider || '—';
             document.getElementById('info-ref').textContent = siteInfo.ref || '—';
-            // 凭据：预置=私有仓库已配置凭据；否则=无预置（运行时若 401 会弹窗输入）
-            const authTxt = siteInfo.hasPresetAuth
-                ? (currentLang === 'zh' ? '已预置（私有仓库）' : 'Preset (private repo)')
-                : (currentLang === 'zh' ? '无预置（访问时按需输入）' : 'None (enter on 401)');
+            // 凭据：预置=私有仓库已配置凭据；否则检查浏览器保存状态
+            let authTxt;
+            if (siteInfo.hasPresetAuth) {
+                authTxt = currentLang === 'zh' ? '已预置（私有仓库）' : 'Preset (private repo)';
+            } else {
+                const si = getSavedAuthInfo();
+                if (si.has) {
+                    authTxt = currentLang === 'zh' ? ('已保存（剩余 ' + si.daysLeft + ' 天）') : ('Saved (' + si.daysLeft + ' days left)');
+                } else if (getStoredAuth()) {
+                    authTxt = currentLang === 'zh' ? '本会话有效' : 'This session';
+                } else {
+                    authTxt = currentLang === 'zh' ? '无预置（访问时按需输入）' : 'None (enter on 401)';
+                }
+            }
             document.getElementById('info-auth').textContent = authTxt;
             document.getElementById('info-created').textContent = siteInfo.createdAt || '—';
             document.getElementById('info-views').textContent = siteInfo.views;
@@ -537,11 +553,47 @@
         return '?ref=' + encodeURIComponent(currentRef);
     }
 
-    // ---------- 凭据（sessionStorage，仅当前标签页） ----------
+    // ---------- 凭据（sessionStorage 本会话 / localStorage 持久 7 天） ----------
+    // 读取优先级：localStorage（带过期）> sessionStorage（本会话）
     function getStoredAuth() {
+        try {
+            const saved = JSON.parse(localStorage.getItem(STORAGE_KEY_LOCAL));
+            if (saved && saved.expiresAt && Date.now() < saved.expiresAt) {
+                // 同步到 sessionStorage，保证本会话 authHeader 一致
+                sessionStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
+                return saved;
+            }
+            if (saved) localStorage.removeItem(STORAGE_KEY_LOCAL); // 过期清理
+        } catch (e) {}
         try { return JSON.parse(sessionStorage.getItem(STORAGE_KEY)); } catch (e) { return null; }
     }
-    function storeAuth(auth) { sessionStorage.setItem(STORAGE_KEY, JSON.stringify(auth)); }
+    // persist=true → 存 localStorage 并带 7 天过期；false → 仅 sessionStorage 并清掉旧持久记录
+    function storeAuth(auth, persist) {
+        sessionStorage.setItem(STORAGE_KEY, JSON.stringify(auth));
+        if (persist) {
+            auth.expiresAt = Date.now() + SAVE_DAYS * 86400000;
+            localStorage.setItem(STORAGE_KEY_LOCAL, JSON.stringify(auth));
+        } else {
+            localStorage.removeItem(STORAGE_KEY_LOCAL);
+        }
+    }
+    // 清除全部凭据（持久 + 会话），用于保存的凭据失效时
+    function clearAllAuth() {
+        localStorage.removeItem(STORAGE_KEY_LOCAL);
+        sessionStorage.removeItem(STORAGE_KEY);
+    }
+    // 检查是否有有效的持久凭据（用于预填勾选框 & 站点信息展示）
+    function getSavedAuthInfo() {
+        try {
+            const saved = JSON.parse(localStorage.getItem(STORAGE_KEY_LOCAL));
+            if (saved && saved.expiresAt && Date.now() < saved.expiresAt) {
+                const left = Math.ceil((saved.expiresAt - Date.now()) / 86400000);
+                return { has: true, daysLeft: left };
+            }
+            if (saved) localStorage.removeItem(STORAGE_KEY_LOCAL);
+        } catch (e) {}
+        return { has: false };
+    }
     function authHeader() {
         const a = getStoredAuth();
         if (!a) return {};
@@ -556,6 +608,8 @@
         opts.headers = Object.assign({}, opts.headers || {}, authHeader());
         let resp = await fetch(url, opts);
         if (resp.status === 401) {
+            // 保存的凭据失效 → 清掉持久记录，避免循环用过期凭据
+            if (getSavedAuthInfo().has) clearAllAuth();
             await promptAuth();
             opts.headers = Object.assign({}, opts.headers || {}, authHeader());
             resp = await fetch(url, opts);
@@ -591,7 +645,8 @@
         const auth = { type };
         if (type === 'token') auth.token = document.getElementById('auth-token').value;
         else { auth.username = document.getElementById('auth-username').value; auth.password = document.getElementById('auth-password').value; }
-        storeAuth(auth);
+        const persist = document.getElementById('auth-save-local').checked;
+        storeAuth(auth, persist);
         const fromButton = authFromButton;
         authFromButton = false;
         closeAuth(auth);
@@ -611,6 +666,9 @@
     if (authSiteBtn) {
         authSiteBtn.addEventListener('click', () => {
             const saved = getStoredAuth();
+            const savedInfo = getSavedAuthInfo();
+            // 预填勾选框：有持久凭据则默认勾选
+            document.getElementById('auth-save-local').checked = savedInfo.has;
             if (saved) {
                 document.getElementById('auth-type').value = saved.type || 'token';
                 document.getElementById('auth-type').dispatchEvent(new Event('change'));
