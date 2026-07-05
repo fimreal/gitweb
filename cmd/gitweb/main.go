@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"html/template"
 	"log"
 	"net/http"
 	"os"
@@ -17,6 +18,7 @@ import (
 	"github.com/limingrui/gitweb/internal/registry"
 	"github.com/limingrui/gitweb/internal/render"
 	"github.com/limingrui/gitweb/internal/server"
+	"github.com/limingrui/gitweb/web"
 )
 
 // version 在构建时通过 -ldflags "-X main.version=..." 注入，默认 dev。
@@ -26,6 +28,7 @@ func main() {
 	configPath := flag.String("config", "", "path to config file")
 	listen := flag.String("listen", "", "listen address (overrides config)")
 	baseURL := flag.String("base-url", "", "base URL (overrides config)")
+	password := flag.String("password", "", "access password/key (overrides config); if set, all pages require login")
 	httpProxy := flag.String("http-proxy", "", "HTTP proxy (overrides config and env)")
 	httpsProxy := flag.String("https-proxy", "", "HTTPS proxy (overrides config and env)")
 	statePath := flag.String("state", "./gitweb.state.json", "path to state file for persisted sites (empty = in-memory only)")
@@ -67,6 +70,9 @@ func main() {
 	}
 	if *baseURL != "" {
 		cfg.BaseURL = *baseURL
+	}
+	if *password != "" {
+		cfg.Password = *password
 	}
 	if *httpProxy != "" {
 		cfg.Fetch.HTTPProxy = *httpProxy
@@ -130,12 +136,16 @@ func main() {
 	cacheMgr := cache.New(cfg.Cache.TTL, cfg.Cache.MaxEntries)
 	renderer := render.New()
 
-	srv := server.New(reg, providerMgr, cacheMgr, renderer, cfg.BaseURL, cfg.Cache.MaxFileSize)
+	srv := server.New(reg, providerMgr, cacheMgr, renderer, cfg.BaseURL, cfg.Cache.MaxFileSize, cfg.Password)
 
 	r := srv.SetupRoutes()
 
-	r.LoadHTMLGlob("web/templates/*")
-	r.Static("/static", "web/static")
+	// 从嵌入的 web 目录加载模板（不再依赖外部文件系统）。
+	tpl := template.Must(template.New("").ParseFS(web.Templates, "templates/*.html"))
+	r.SetHTMLTemplate(tpl)
+
+	// 静态资源也从嵌入 FS serve。
+	r.StaticFS("/static", http.FS(web.Static))
 
 	log.Printf("Starting gitweb on %s", cfg.Listen)
 	log.Printf("Base URL: %s", cfg.BaseURL)

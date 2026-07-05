@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>gitweb · Login</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <style>
+        body { display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }
+        .login-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: var(--r-lg);
+            box-shadow: var(--shadow-lg);
+            padding: 32px 28px;
+            width: 100%;
+            max-width: 360px;
+        }
+        .login-card h1 { margin: 0 0 8px; font-size: 22px; font-weight: 700; color: var(--fg); display: flex; align-items: center; gap: 8px; }
+        .login-card .login-logo svg { width: 24px; height: 24px; color: var(--accent); }
+        .login-card p.sub { margin: 0 0 20px; color: var(--secondary); font-size: 14px; }
+        .login-card .login-form { display: flex; flex-direction: column; gap: 12px; }
+        .login-card input {
+            width: 100%;
+            padding: 11px 13px;
+            border: 1px solid var(--border);
+            border-radius: var(--r-sm);
+            background: var(--input-bg);
+            color: var(--fg);
+            font-size: 15px;
+            box-sizing: border-box;
+            outline: none;
+            transition: border-color .15s, box-shadow .15s;
+        }
+        .login-card input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+        .login-card button {
+            width: 100%;
+            padding: 11px;
+            border: none;
+            border-radius: var(--r-sm);
+            background: var(--accent);
+            color: #fff;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background .15s;
+        }
+        .login-card button:hover { background: var(--accent-hover); }
+        .login-card .err {
+            color: var(--error);
+            font-size: 13px;
+            margin: -4px 0 4px;
+            min-height: 18px;
+        }
+        .login-card .lang-toggle {
+            position: absolute;
+            top: 18px;
+            right: 18px;
+            background: none;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 4px 10px;
+            color: var(--secondary);
+            font-size: 13px;
+            cursor: pointer;
+            width: auto;
+        }
+        .login-wrap { position: relative; }
+    </style>
+</head>
+<body>
+    <div class="login-wrap">
+        <button class="lang-toggle" id="lang-toggle" type="button">EN</button>
+        <div class="login-card">
+            <h1 class="login-logo">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="6" r="2.5"/><path d="M6 8.5v7"/><path d="M6 12h6a3 3 0 0 0 3-3V8.5"/></svg>
+                gitweb
+            </h1>
+            <p class="sub" data-en="Enter password to continue" data-zh="输入密码以继续">Enter password to continue</p>
+            <form class="login-form" method="POST" action="/login" autocomplete="off">
+                <input type="hidden" name="redirect" value="{{ .Redirect }}">
+                <input type="password" name="password" id="password"
+                       placeholder="Password"
+                       data-en-placeholder="Password"
+                       data-zh-placeholder="密码"
+                       autocomplete="current-password"
+                       autofocus required>
+                <p class="err">{{ if .Error }}{{ if false }}{{ end }}<span data-en="Wrong password" data-zh="密码错误">Wrong password</span>{{ end }}</p>
+                <button type="submit" data-en="Login" data-zh="登录">Login</button>
+            </form>
+        </div>
+    </div>
+    <script>
+    (function () {
+        var lang = localStorage.getItem('lang') || (navigator.language.startsWith('zh') ? 'zh' : 'en');
+        function applyLang(l) {
+            document.documentElement.setAttribute('lang', l === 'zh' ? 'zh-CN' : 'en');
+            document.querySelectorAll('[data-en][data-zh]').forEach(function (el) {
+                var text = lang === 'zh' ? el.getAttribute('data-zh') : el.getAttribute('data-en');
+                if (el.tagName === 'INPUT') el.placeholder = text; else el.textContent = text;
+            });
+        }
+        applyLang(lang);
+        var btn = document.getElementById('lang-toggle');
+        if (btn) {
+            btn.textContent = lang === 'en' ? '中文' : 'EN';
+            btn.addEventListener('click', function () {
+                lang = lang === 'en' ? 'zh' : 'en';
+                localStorage.setItem('lang', lang);
+                applyLang(lang);
+                btn.textContent = lang === 'en' ? '中文' : 'EN';
+            });
+        }
+    })();
+    </script>
+</body>
+</html>

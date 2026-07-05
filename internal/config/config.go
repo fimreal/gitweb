@@ -9,11 +9,12 @@ import (
 )
 
 type Config struct {
-	BaseURL string      `yaml:"base_url"`
-	Listen  string      `yaml:"listen"`
-	Cache   CacheConfig `yaml:"cache"`
-	Fetch   FetchConfig `yaml:"fetch"`
-	Sites   []SiteSpec  `yaml:"sites"`
+	BaseURL  string      `yaml:"base_url"`
+	Listen   string      `yaml:"listen"`
+	Password string      `yaml:"password"` // 可选：若非空则所有页面需登录后才能访问
+	Cache    CacheConfig `yaml:"cache"`
+	Fetch    FetchConfig `yaml:"fetch"`
+	Sites    []SiteSpec  `yaml:"sites"`
 }
 
 type CacheConfig struct {

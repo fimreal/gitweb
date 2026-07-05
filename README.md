@@ -8,7 +8,9 @@ Transform git repositories into browsable web pages.
 - **On-demand fetching**: Fetches single files from remote git repositories (GitHub/GitLab/Gitea) — no clone
 - **Multiple formats**: Renders `.md`/`.txt`/code as HTML, `.html` in a sandboxed iframe, images inline
 - **Private repositories**: When a repo requires auth, the viewer prompts for a token or username/password at access time. Credentials stay in the browser (sessionStorage) and are sent per-request — never stored on the server
+- **Optional site password**: Set a password in config / via `-password` flag to require login before any page can be accessed. Not set = public (default).
 - **File tree**: Floating, draggable file browser to navigate the repo
+- **Single binary**: Web assets (templates, CSS, JS) are embedded. Drop the binary anywhere — no `web/` directory needed.
 - **In-memory caching**: LRU + TTL cache; restart clears everything (stateless)
 - **Security**: SSRF protection (private/loopback hosts blocked), file-size limits via streaming, strict CSP, sandboxed HTML rendering
 - **Responsive UI**: Dark mode and bilingual (EN/中文)
@@ -27,6 +29,9 @@ go build -o gitweb ./cmd/gitweb
 
 # Run with CLI flags
 ./gitweb --base-url http://example.com
+
+# Require a password to access the site
+./gitweb --password your-secret
 ```
 
 Visit `http://localhost:8080` to register repositories.
@@ -38,6 +43,10 @@ See `config.example.yaml` for a full example.
 ```yaml
 base_url: http://localhost:8080
 listen: ":8080"
+
+# Optional access password: if set, all pages require login to access.
+# Leave empty / unset for public access (the default).
+# password: "your-secret-password"
 
 cache:
   ttl: 60s
@@ -128,6 +137,7 @@ Long plain-text files are paginated client-side.
 ## Security
 
 - **No registration auth**: Public service. SSRF protection, file-size limits, and cache/timeout caps bound abuse.
+- **Site password** (optional): If `password` is set (config or `-password` flag), a cookie-based login gates every page. `/login`, `/logout`, `/healthz`, and `/static/*` remain public so the login page can render.
 - **SSRF protection**: `allow_hosts`/`deny_hosts` (wildcards supported); private/loopback/link-local IPs blocked by default.
 - **File size**: Streamed via `io.LimitReader` — oversized files are rejected before filling memory.
 - **CSP + sandbox**: Viewer pages send a strict Content-Security-Policy; user `.html` is rendered in `<iframe sandbox="allow-same-origin">` (no `allow-scripts`) to stop untrusted scripts.

@@ -3,7 +3,9 @@ package server
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -42,9 +44,10 @@ type Server struct {
 	renderer    *render.Renderer
 	baseURL     string
 	maxFileSize int64
+	password    string // 非空时所有页面需登录后才能访问
 }
 
-func New(reg *registry.Registry, prov *provider.Manager, c *cache.Cache, rend *render.Renderer, baseURL string, maxFileSize int64) *Server {
+func New(reg *registry.Registry, prov *provider.Manager, c *cache.Cache, rend *render.Renderer, baseURL string, maxFileSize int64, password string) *Server {
 	return &Server{
 		registry:    reg,
 		provider:    prov,
@@ -52,14 +55,23 @@ func New(reg *registry.Registry, prov *provider.Manager, c *cache.Cache, rend *r
 		renderer:    rend,
 		baseURL:     baseURL,
 		maxFileSize: maxFileSize,
+		password:    password,
 	}
 }
 
 func (s *Server) SetupRoutes() *gin.Engine {
 	r := gin.Default()
 
-	r.GET("/", s.handleIndex)
 	r.GET("/healthz", s.handleHealth)
+
+	// 若设置了 password，所有路由都需要登录（cookie 校验）。
+	// 公开路径（/login、/logout、/static/*、/healthz）由 middleware 跳过。
+	r.GET("/login", s.handleLoginPage)
+	r.POST("/login", s.handleLoginSubmit)
+	r.GET("/logout", s.handleLogout)
+	r.Use(s.authMiddleware())
+
+	r.GET("/", s.handleIndex)
 
 	api := r.Group("/api")
 	{
@@ -76,6 +88,110 @@ func (s *Server) SetupRoutes() *gin.Engine {
 	r.GET("/:pathid/*filepath", s.handleSiteFile)
 
 	return r
+}
+
+// isPublicPath 返回不需要登录就能访问的路径。仅在 s.password != "" 时生效。
+func isPublicPath(p string) bool {
+	if p == "/login" || p == "/logout" || p == "/healthz" {
+		return true
+	}
+	return strings.HasPrefix(p, "/static/")
+}
+
+// loginCookieName 是登录凭证 cookie 的名称。
+const loginCookieName = "gitweb_auth"
+
+// repoAuthCookieName 是 viewer 私有仓库凭据 cookie 的前缀。
+// 前端在保存凭据时同步写到 localStorage + cookie，浏览器导航（地址栏直接访问
+// /<pathid>/<file>）会自动带 cookie，后端从中恢复 Authorization 头。
+const repoAuthCookieName = "gitweb_repo_auth"
+
+// authMiddleware 校验登录 cookie；未通过则重定向到 /login。
+// 仅在 s.password != "" 时挂载。
+func (s *Server) authMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if s.password == "" || isPublicPath(c.Request.URL.Path) || s.checkLogin(c) {
+			c.Next()
+			return
+		}
+		// API 请求返回 401，页面请求 302 到 /login
+		if strings.HasPrefix(c.Request.URL.Path, "/api/") {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+			return
+		}
+		redirect := c.Request.URL.RequestURI()
+		c.Redirect(http.StatusFound, "/login?redirect="+base64.RawURLEncoding.EncodeToString([]byte(redirect)))
+		c.Abort()
+	}
+}
+
+// checkLogin 常量时间比较 cookie 值与 s.password。
+func (s *Server) checkLogin(c *gin.Context) bool {
+	if s.password == "" {
+		return true
+	}
+	v, err := c.Cookie(loginCookieName)
+	if err != nil || v == "" {
+		return false
+	}
+	// 简单字符串等值比较；常量时间避免 timing 攻击
+	return subtle.ConstantTimeCompare([]byte(v), []byte(s.password)) == 1
+}
+
+// handleLoginPage 渲染登录页。若有 redirect query 则带回到表单 hidden 字段。
+func (s *Server) handleLoginPage(c *gin.Context) {
+	if s.password == "" {
+		c.Redirect(http.StatusFound, "/")
+		return
+	}
+	redirect := c.Query("redirect")
+	if redirect != "" {
+		if raw, err := base64.RawURLEncoding.DecodeString(redirect); err == nil {
+			redirect = string(raw)
+		} else {
+			redirect = ""
+		}
+	}
+	c.HTML(http.StatusOK, "login.html", gin.H{
+		"BaseURL":  s.baseURL,
+		"Redirect": redirect,
+		"Error":   "",
+	})
+}
+
+// handleLoginSubmit 校验密码并种 cookie，成功则重定向到 redirect 或 /。
+func (s *Server) handleLoginSubmit(c *gin.Context) {
+	if s.password == "" {
+		c.Redirect(http.StatusFound, "/")
+		return
+	}
+	pw := c.PostForm("password")
+	redirect := c.PostForm("redirect")
+	if subtle.ConstantTimeCompare([]byte(pw), []byte(s.password)) == 1 {
+		// 种 cookie：HttpOnly + SameSite=Lax + 30 天
+		c.SetSameSite(http.SameSiteLaxMode)
+		c.SetCookie(loginCookieName, pw, 30*24*3600, "/", "", false, true)
+		if redirect == "" || strings.HasPrefix(redirect, "/") == false {
+			redirect = "/"
+		}
+		c.Redirect(http.StatusFound, redirect)
+		return
+	}
+	c.HTML(http.StatusUnauthorized, "login.html", gin.H{
+		"BaseURL":  s.baseURL,
+		"Redirect": redirect,
+		"Error":   true,
+	})
+}
+
+// handleLogout 清除 cookie 后回到登录页（若已设 password；否则直接回首页）。
+func (s *Server) handleLogout(c *gin.Context) {
+	if s.password != "" {
+		c.SetCookie(loginCookieName, "", -1, "/", "", false, true)
+		c.Redirect(http.StatusFound, "/login")
+	} else {
+		c.Redirect(http.StatusFound, "/")
+	}
 }
 
 func (s *Server) handleIndex(c *gin.Context) {
@@ -410,6 +526,15 @@ func authFromHeader(c *gin.Context, fallback *registry.Auth) *provider.Auth {
 		}
 	}
 
+	// 兜底1：从 cookie 恢复 viewer 端保存的私有仓库凭据。
+	// 浏览器地址栏直接访问 /<pathid>/<file> 时无法发 Authorization 头，
+	// 但同源请求会自动带 cookie，这里从中恢复鉴权。
+	if a.Type == "" {
+		if v, err := c.Cookie(repoAuthCookieName + "_" + c.Param("pathid")); err == nil && v != "" {
+			decodeCookieAuth(v, a)
+		}
+	}
+
 	if a.Type == "" && fallback != nil {
 		return &provider.Auth{
 			Type:     fallback.Type,
@@ -422,6 +547,28 @@ func authFromHeader(c *gin.Context, fallback *registry.Auth) *provider.Auth {
 		return nil
 	}
 	return a
+}
+
+// decodeCookieAuth 从 cookie 值（base64 编码的 JSON {"type":"token","token":"...","username":"...","password":"..."}）
+// 解析出 auth 到 a。失败时保持 a 不变。
+func decodeCookieAuth(v string, a *provider.Auth) {
+	raw, err := base64.StdEncoding.DecodeString(v)
+	if err != nil {
+		raw = []byte(v) // 兜底当作明文 JSON
+	}
+	var parsed struct {
+		Type     string `json:"type"`
+		Token    string `json:"token"`
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		return
+	}
+	a.Type = parsed.Type
+	a.Token = parsed.Token
+	a.Username = parsed.Username
+	a.Password = parsed.Password
 }
 
 // requestBaseURL 基于当前请求推导「访问本服务的根 URL」。
