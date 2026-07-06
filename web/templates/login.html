@@ -6,73 +6,119 @@
     <title>gitweb · Login</title>
     <link rel="stylesheet" href="/static/css/style.css">
     <style>
-        body { display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }
-        .login-card {
-            background: var(--card-bg);
-            border: 1px solid var(--border);
-            border-radius: var(--r-lg);
-            box-shadow: var(--shadow-lg);
-            padding: 32px 28px;
-            width: 100%;
-            max-width: 360px;
+        body {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            overflow: auto;
+            padding: 24px;
         }
-        .login-card h1 { margin: 0 0 8px; font-size: 22px; font-weight: 700; color: var(--fg); display: flex; align-items: center; gap: 8px; }
-        .login-card .login-logo svg { width: 24px; height: 24px; color: var(--accent); }
-        .login-card p.sub { margin: 0 0 20px; color: var(--secondary); font-size: 14px; }
-        .login-card .login-form { display: flex; flex-direction: column; gap: 12px; }
-        .login-card input {
+        .login-wrap {
             width: 100%;
-            padding: 11px 13px;
+            max-width: 380px;
+            position: relative;
+        }
+        .login-card {
+            background: var(--glass-bg);
+            -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(160%);
+            backdrop-filter: blur(var(--glass-blur)) saturate(160%);
+            border: 1px solid var(--glass-border);
+            border-radius: var(--r-xl);
+            box-shadow: var(--shadow-xl);
+            padding: 36px 32px;
+        }
+        .login-card h1 {
+            margin: 0 0 6px;
+            font-size: 24px;
+            font-weight: 700;
+            color: var(--fg);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            letter-spacing: -0.02em;
+            background: linear-gradient(135deg, var(--accent) 0%, var(--accent-hover) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .login-card h1 svg {
+            width: 26px;
+            height: 26px;
+            color: var(--accent);
+            -webkit-text-fill-color: var(--accent);
+        }
+        .login-card .sub {
+            margin: 0 0 24px;
+            color: var(--secondary);
+            font-size: 14px;
+        }
+        .login-form {
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+        }
+        .login-form input[type="password"] {
+            width: 100%;
+            padding: 12px 14px;
             border: 1px solid var(--border);
             border-radius: var(--r-sm);
-            background: var(--input-bg);
+            background: var(--panel-bg);
             color: var(--fg);
             font-size: 15px;
-            box-sizing: border-box;
+            font-family: inherit;
             outline: none;
             transition: border-color .15s, box-shadow .15s;
         }
-        .login-card input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
-        .login-card button {
+        .login-form input[type="password"]:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px var(--accent-soft);
+        }
+        .login-form button[type="submit"] {
             width: 100%;
-            padding: 11px;
+            padding: 12px;
             border: none;
             border-radius: var(--r-sm);
-            background: var(--accent);
+            background: linear-gradient(135deg, var(--accent) 0%, var(--accent-hover) 100%);
             color: #fff;
             font-size: 15px;
             font-weight: 600;
             cursor: pointer;
-            transition: background .15s;
+            transition: transform .15s, box-shadow .15s;
+            font-family: inherit;
         }
-        .login-card button:hover { background: var(--accent-hover); }
-        .login-card .err {
+        .login-form button[type="submit"]:hover {
+            transform: translateY(-1px);
+            box-shadow: var(--shadow-md);
+        }
+        .login-form button[type="submit"]:active {
+            transform: translateY(0);
+        }
+        .err {
             color: var(--error);
             font-size: 13px;
             margin: -4px 0 4px;
             min-height: 18px;
         }
-        .login-card .lang-toggle {
-            position: absolute;
-            top: 18px;
-            right: 18px;
-            background: none;
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 4px 10px;
-            color: var(--secondary);
-            font-size: 13px;
-            cursor: pointer;
-            width: auto;
+        :root {
+            --error: #dc2626;
         }
-        .login-wrap { position: relative; }
+        [data-theme="dark"] {
+            --error: #f87171;
+        }
     </style>
 </head>
 <body>
+    <div class="controls">
+        <button id="theme-toggle" class="icon-btn" title="Toggle theme" aria-label="Toggle theme">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+        </button>
+        <button id="lang-toggle" class="icon-btn" title="Switch language" aria-label="Switch language">EN</button>
+    </div>
+
     <div class="login-wrap">
-        <button class="lang-toggle" id="lang-toggle" type="button">EN</button>
         <div class="login-card">
-            <h1 class="login-logo">
+            <h1>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="6" r="2.5"/><path d="M6 8.5v7"/><path d="M6 12h6a3 3 0 0 0 3-3V8.5"/></svg>
                 gitweb
             </h1>
@@ -85,32 +131,73 @@
                        data-zh-placeholder="密码"
                        autocomplete="current-password"
                        autofocus required>
-                <p class="err">{{ if .Error }}{{ if false }}{{ end }}<span data-en="Wrong password" data-zh="密码错误">Wrong password</span>{{ end }}</p>
+                <p class="err">
+                    {{ if .Error }}<span data-en="Wrong password" data-zh="密码错误">Wrong password</span>{{ end }}
+                    {{ if .Locked }}<span data-en="Too many attempts. Try again in {{ .LockSec }}s." data-zh="尝试次数过多，请 {{ .LockSec }} 秒后重试。">Too many attempts. Try again in {{ .LockSec }}s.</span>{{ end }}
+                </p>
                 <button type="submit" data-en="Login" data-zh="登录">Login</button>
             </form>
         </div>
     </div>
+
     <script>
     (function () {
-        var lang = localStorage.getItem('lang') || (navigator.language.startsWith('zh') ? 'zh' : 'en');
-        function applyLang(l) {
-            document.documentElement.setAttribute('lang', l === 'zh' ? 'zh-CN' : 'en');
+        var currentLang = localStorage.getItem('lang') || (navigator.language.startsWith('zh') ? 'zh' : 'en');
+
+        function applyTheme(theme) {
+            document.documentElement.setAttribute('data-theme', theme);
+        }
+
+        function initTheme() {
+            var saved = localStorage.getItem('theme');
+            var systemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+            applyTheme(saved || (systemDark ? 'dark' : 'light'));
+
+            var toggle = document.getElementById('theme-toggle');
+            if (toggle) {
+                toggle.addEventListener('click', function () {
+                    var cur = document.documentElement.getAttribute('data-theme') || 'light';
+                    var next = cur === 'dark' ? 'light' : 'dark';
+                    applyTheme(next);
+                    localStorage.setItem('theme', next);
+                });
+            }
+
+            window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function (e) {
+                if (!localStorage.getItem('theme')) applyTheme(e.matches ? 'dark' : 'light');
+            });
+        }
+
+        function applyLang(lang) {
+            document.documentElement.setAttribute('lang', lang === 'zh' ? 'zh-CN' : 'en');
             document.querySelectorAll('[data-en][data-zh]').forEach(function (el) {
                 var text = lang === 'zh' ? el.getAttribute('data-zh') : el.getAttribute('data-en');
-                if (el.tagName === 'INPUT') el.placeholder = text; else el.textContent = text;
+                if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') el.placeholder = text;
+                else el.textContent = text;
+            });
+            document.querySelectorAll('[data-en-placeholder][data-zh-placeholder]').forEach(function (el) {
+                el.placeholder = lang === 'zh' ? el.getAttribute('data-zh-placeholder') : el.getAttribute('data-en-placeholder');
             });
         }
-        applyLang(lang);
-        var btn = document.getElementById('lang-toggle');
-        if (btn) {
-            btn.textContent = lang === 'en' ? '中文' : 'EN';
-            btn.addEventListener('click', function () {
-                lang = lang === 'en' ? 'zh' : 'en';
-                localStorage.setItem('lang', lang);
-                applyLang(lang);
-                btn.textContent = lang === 'en' ? '中文' : 'EN';
-            });
+
+        function initLang() {
+            applyLang(currentLang);
+            var btn = document.getElementById('lang-toggle');
+            if (btn) {
+                btn.textContent = currentLang === 'en' ? '中' : 'EN';
+                btn.title = currentLang === 'en' ? 'Switch language' : '切换语言';
+                btn.addEventListener('click', function () {
+                    currentLang = currentLang === 'en' ? 'zh' : 'en';
+                    localStorage.setItem('lang', currentLang);
+                    applyLang(currentLang);
+                    btn.textContent = currentLang === 'en' ? '中' : 'EN';
+                    btn.title = currentLang === 'en' ? 'Switch language' : '切换语言';
+                });
+            }
         }
+
+        initTheme();
+        initLang();
     })();
     </script>
 </body>

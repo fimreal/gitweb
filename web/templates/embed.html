@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ .Filename }} - gitweb</title>
+    <link rel="stylesheet" href="/static/css/viewer.css">
+    <style>
+        body { background: var(--bg); color: var(--fg); }
+        .embed-wrap { max-width: 960px; margin: 0 auto; padding: 32px 24px 80px; }
+        .embed-header { display: flex; align-items: center; gap: 10px; margin-bottom: 24px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
+        .embed-header .embed-fname { font-size: 16px; font-weight: 600; }
+        .embed-header .embed-repo { font-size: 13px; color: var(--secondary); }
+        .embed-header .embed-repo a { color: var(--accent); text-decoration: none; }
+        .embed-header .embed-repo a:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+    <div class="embed-wrap">
+        <div class="embed-header">
+            <span class="embed-fname">{{ .Filename }}</span>
+            <span class="embed-repo"><a href="/{{ .PathID }}">{{ .RepoName }}</a>{{ if .Ref }} · {{ .Ref }}{{ end }}</span>
+        </div>
+        <div class="embed-body">{{ .Content | safehtml }}</div>
+    </div>
+</body>
+</html>

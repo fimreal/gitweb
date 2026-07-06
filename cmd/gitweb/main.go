@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"html/template"
+	"io/fs"
 	"log"
 	"net/http"
 	"os"
@@ -141,11 +142,18 @@ func main() {
 	r := srv.SetupRoutes()
 
 	// 从嵌入的 web 目录加载模板（不再依赖外部文件系统）。
-	tpl := template.Must(template.New("").ParseFS(web.Templates, "templates/*.html"))
+	// safehtml：标记已渲染的 HTML 片段为安全（embed 页面注入渲染结果用）。
+	tpl := template.Must(template.New("").Funcs(template.FuncMap{
+		"safehtml": func(s string) template.HTML { return template.HTML(s) },
+	}).ParseFS(web.Templates, "templates/*.html"))
 	r.SetHTMLTemplate(tpl)
 
-	// 静态资源也从嵌入 FS serve。
-	r.StaticFS("/static", http.FS(web.Static))
+	// 静态资源也从嵌入 FS serve（去掉一层 static/ 前缀）。
+	staticFS, err := fs.Sub(web.Static, "static")
+	if err != nil {
+		log.Fatalf("Failed to mount static FS: %v", err)
+	}
+	r.StaticFS("/static", http.FS(staticFS))
 
 	log.Printf("Starting gitweb on %s", cfg.Listen)
 	log.Printf("Base URL: %s", cfg.BaseURL)
