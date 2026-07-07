@@ -13,12 +13,14 @@ import (
 	"time"
 
 	"golang.org/x/sync/singleflight"
+	"golang.org/x/time/rate"
 )
 
 var (
 	ErrNotFound     = errors.New("file not found")
 	ErrTooLarge     = errors.New("file too large")
 	ErrAuthRequired = errors.New("authentication required")
+	ErrRateLimited  = errors.New("rate limit exceeded for this host")
 )
 
 // probeTimeout 限制单次 provider 探测的耗时，避免死 host 拖慢注册。
@@ -81,9 +83,16 @@ type Manager struct {
 	deny       []string
 	maxSize    int64
 	probeCache sync.Map // host(string) -> providerType(string)；只缓存正例
+
+	// rateLimiters: 按 host 分桶的令牌桶限流器。
+	// 每个 host 独立限流，避免单平台被过度请求，也避免某平台限流影响其他平台。
+	// 默认 100 req/min（约 6000 req/hour），可通过配置调整。
+	rateLimit     int           // 每分钟允许的请求数
+	rateBurst     int           // 令牌桶突发容量（默认与 rateLimit 相同）
+	rateLimiters  sync.Map      // host(string) -> *rate.Limiter
 }
 
-func NewManager(timeout time.Duration, httpProxy, httpsProxy string, allow, deny []string, maxSize int64) *Manager {
+func NewManager(timeout time.Duration, httpProxy, httpsProxy string, allow, deny []string, maxSize int64, rateLimit int) *Manager {
 	transport := &http.Transport{}
 
 	// 配置代理
@@ -99,18 +108,45 @@ func NewManager(timeout time.Duration, httpProxy, httpsProxy string, allow, deny
 		}
 	}
 
+	// 默认限流 100 req/min
+	if rateLimit <= 0 {
+		rateLimit = 100
+	}
+
 	return &Manager{
 		client: &http.Client{
 			Timeout:   timeout,
 			Transport: transport,
 		},
-		allow:   allow,
-		deny:    deny,
-		maxSize: maxSize,
+		allow:     allow,
+		deny:      deny,
+		maxSize:   maxSize,
+		rateLimit: rateLimit,
+		rateBurst: rateLimit, // burst 与 rate 相同，允许短时间内集中请求
 	}
 }
 
+// getLimiter 返回指定 host 的 rate limiter，按需创建。
+func (m *Manager) getLimiter(host string) *rate.Limiter {
+	if v, ok := m.rateLimiters.Load(host); ok {
+		return v.(*rate.Limiter)
+	}
+
+	limiter := rate.NewLimiter(rate.Limit(m.rateLimit)/60, m.rateBurst) // rate.Limit 是每秒请求数
+	m.rateLimiters.Store(host, limiter)
+	return limiter
+}
+
 func (m *Manager) Fetch(ctx context.Context, providerType, gitURL, ref, filepath string, auth *Auth) ([]byte, error) {
+	// 先检查 host 限流
+	host := extractHost(gitURL)
+	if host != "" {
+		limiter := m.getLimiter(host)
+		if !limiter.Allow() {
+			return nil, ErrRateLimited
+		}
+	}
+
 	key := fmt.Sprintf("%s:%s:%s:%s", providerType, gitURL, ref, filepath)
 
 	v, err, _ := m.sf.Do(key, func() (interface{}, error) {
@@ -506,4 +542,20 @@ func (m *Manager) probeProvider(scheme, host string) string {
 		}
 	}
 	return ""
+}
+
+// extractHost 从 git URL 中提取 host（不含端口），用于限流分桶。
+// 若 URL 解析失败则返回空字符串（不限流）。
+func extractHost(gitURL string) string {
+	u, err := url.Parse(gitURL)
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	// 只取 hostname，不含端口
+	h, _, err := net.SplitHostPort(u.Host)
+	if err != nil {
+		// u.Host 可能不含端口，直接返回
+		return u.Host
+	}
+	return h
 }

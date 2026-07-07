@@ -1,5 +1,6 @@
 # syntax=docker/dockerfile:1
-# gitweb — runtime-loaded web assets (no go:embed), so web/ must ship in the image.
+# gitweb — web assets are embedded into the Go binary via //go:embed,
+# so the final image only needs the single static binary.
 
 FROM golang:1.26-alpine AS builder
 WORKDIR /src
@@ -9,7 +10,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-# CGO disabled for a static, portable binary
+# CGO disabled for a static, portable binary; web/ is embedded at build time.
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/gitweb ./cmd/gitweb
 
 FROM alpine:3.20
@@ -18,7 +19,6 @@ RUN apk add --no-cache ca-certificates tzdata && \
 
 WORKDIR /app
 COPY --from=builder /out/gitweb /app/gitweb
-COPY web /app/web
 
 USER app
 EXPOSE 8080

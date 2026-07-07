@@ -30,6 +30,7 @@ type FetchConfig struct {
 	HTTPSProxy string        `yaml:"https_proxy"`
 	AllowHosts []string      `yaml:"allow_hosts"`
 	DenyHosts  []string      `yaml:"deny_hosts"`
+	RateLimit  int           `yaml:"rate_limit"` // 每分钟每个 host 允许的请求数，默认 100
 }
 
 type SiteSpec struct {
@@ -79,6 +80,9 @@ func setDefaults(cfg *Config) {
 	}
 	if cfg.Fetch.Timeout == 0 {
 		cfg.Fetch.Timeout = 10 * time.Second
+	}
+	if cfg.Fetch.RateLimit == 0 {
+		cfg.Fetch.RateLimit = 100 // 默认 100 req/min per host
 	}
 	
 	// 从环境变量读取代理（如果配置文件未指定）

@@ -17,6 +17,15 @@ type TreeNode struct {
 }
 
 func (m *Manager) FetchTree(ctx context.Context, providerType, gitURL, ref string, auth *Auth) ([]TreeNode, error) {
+	// 先检查 host 限流
+	host := extractHost(gitURL)
+	if host != "" {
+		limiter := m.getLimiter(host)
+		if !limiter.Allow() {
+			return nil, ErrRateLimited
+		}
+	}
+
 	base := providerBase{allow: m.allow, deny: m.deny, maxSize: m.maxSize}
 	switch providerType {
 	case "github":
@@ -236,6 +245,15 @@ func fetchGiteaTree(ctx context.Context, client *http.Client, b providerBase, gi
 // ListBranches 列出仓库的分支名。仅支持 API 可达的 provider（GitHub/GitLab/Gitea）。
 // 用于 viewer 临时切换分支，不写入 state。
 func (m *Manager) ListBranches(ctx context.Context, providerType, gitURL string, auth *Auth) ([]string, error) {
+	// 先检查 host 限流
+	host := extractHost(gitURL)
+	if host != "" {
+		limiter := m.getLimiter(host)
+		if !limiter.Allow() {
+			return nil, ErrRateLimited
+		}
+	}
+
 	base := providerBase{allow: m.allow, deny: m.deny, maxSize: m.maxSize}
 	switch providerType {
 	case "github":

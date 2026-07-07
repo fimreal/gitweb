@@ -670,6 +670,10 @@ func (s *Server) serveFetchError(c *gin.Context, err error) {
 		})
 		return
 	}
+	if errors.Is(err, provider.ErrRateLimited) {
+		c.JSON(http.StatusTooManyRequests, gin.H{"error": "rate limit exceeded for this host, please try again later"})
+		return
+	}
 	c.HTML(http.StatusBadGateway, "error.html", gin.H{
 		"Code":    502,
 		"Message": "Failed to fetch file: " + err.Error(),

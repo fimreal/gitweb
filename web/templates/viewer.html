@@ -251,6 +251,14 @@
     let currentLang = localStorage.getItem('lang') ||
                       (navigator.language.startsWith('zh') ? 'zh' : 'en');
 
+    // 根据 HTTP 状态码返回本地化的错误提示，统一处理 429 限流等常见错误。
+    function httpErrorMsg(resp, fallbackZh, fallbackEn) {
+        if (resp.status === 429) {
+            return currentLang === 'zh' ? '请求过于频繁，请稍后再试' : 'Too many requests, please try again later';
+        }
+        return currentLang === 'zh' ? fallbackZh : fallbackEn;
+    }
+
     function applyTheme(theme) {
         document.documentElement.setAttribute('data-theme', theme);
         const btn = document.getElementById('theme-toggle-viewer');
@@ -610,7 +618,7 @@
             try {
                 const resp = await authFetch('/' + pathID + '/' + encodeURI(currentPath) + refQuery() + '&raw=1');
                 if (!resp.ok) {
-                    toast.error(currentLang === 'zh' ? '下载失败（' + resp.status + '）' : 'Download failed (' + resp.status + ')');
+                    toast.error(httpErrorMsg(resp, '下载失败（' + resp.status + '）', 'Download failed (' + resp.status + ')'));
                     closeSettings();
                     return;
                 }
@@ -725,21 +733,11 @@
         if (a.type === 'basic') return { 'Authorization': 'Basic ' + btoa(a.username + ':' + a.password) };
         return {};
     }
-    // 临时诊断：打印 authHeader 返回的凭据类型（不打印凭据本身）
-    function logAuthState(label) {
-        const a = getStoredAuth();
-        const ss = sessionStorage.getItem(STORAGE_KEY);
-        const ls = localStorage.getItem(STORAGE_KEY_LOCAL);
-        console.log('[auth-diag]', label, 'session:', ss ? (ss.length + ' chars, type=' + (JSON.parse(ss)||{}).type) : 'null',
-                    'local:', ls ? (ls.length + ' chars') : 'null',
-                    'header:', a ? a.type : 'null');
-    }
 
     // 带鉴权的 fetch：401 时弹窗要凭据，输入后重试。循环直到成功或用户取消。
     async function authFetch(url, opts) {
         opts = opts || {};
         opts.headers = Object.assign({}, opts.headers || {}, authHeader());
-        logAuthState('authFetch-start');
         let resp = await fetch(url, opts);
         while (resp.status === 401) {
             const prevAuth = getStoredAuth();
@@ -752,14 +750,12 @@
             if (!auth) break; // 用户取消 → 返回 401
             authFailed = false;
             lastFailedType = null;
-            logAuthState('authFetch-retry-after-input');
             // 重新构造完整 headers：清掉旧的 Authorization，用新凭据
             const baseHeaders = {};
             for (const k in opts.headers) {
                 if (k.toLowerCase() !== 'authorization') baseHeaders[k] = opts.headers[k];
             }
             opts.headers = Object.assign(baseHeaders, authHeader());
-            logAuthState('authFetch-retry-header-built');
             resp = await fetch(url, opts);
         }
         return resp;
@@ -816,7 +812,6 @@
         else { auth.username = document.getElementById('auth-username').value; auth.password = document.getElementById('auth-password').value; }
         const persist = document.getElementById('auth-save-local').checked;
         storeAuth(auth, persist);
-        logAuthState('submit-stored');
         const fromButton = authFromButton;
         authFromButton = false;
         closeAuth(auth);
@@ -910,7 +905,7 @@
             const resp = await authFetch('/api/sites/' + pathID + '/tree' + refQuery());
             if (!resp.ok) {
                 allFiles = [];
-                const msg = zh ? '加载文件树失败（' + resp.status + '）' : 'Failed to load tree (' + resp.status + ')';
+                const msg = httpErrorMsg(resp, '加载文件树失败（' + resp.status + '）', 'Failed to load tree (' + resp.status + ')');
                 if (content) content.innerHTML = '<div class="tree-error">' + msg + '</div>';
                 toast.error(msg);
                 return;
@@ -1001,7 +996,7 @@
         try {
             const resp = await authFetch('/' + pathID + '/' + encodeURI(path) + refQuery() + '&raw=1');
             if (!resp.ok) {
-                const msg = currentLang === 'zh' ? '加载失败（' + resp.status + '）' : 'Failed (' + resp.status + ')';
+                const msg = httpErrorMsg(resp, '加载失败（' + resp.status + '）', 'Failed (' + resp.status + ')');
                 area.innerHTML = '<div class="error">' + msg + '</div>';
                 toast.error(msg);
                 return;
@@ -1040,7 +1035,7 @@
             // md/txt/代码：后端返回 HTML 片段，前端注入。长内容前端分页。
             const resp = await authFetch('/' + pathID + '/' + encodeURI(path) + refQuery());
             if (!resp.ok) {
-                const msg = currentLang === 'zh' ? '加载失败（' + resp.status + '）' : 'Failed to load (' + resp.status + ')';
+                const msg = httpErrorMsg(resp, '加载失败（' + resp.status + '）', 'Failed to load (' + resp.status + ')');
                 area.innerHTML = '<div class="error">' + msg + '</div>';
                 toast.error(msg);
                 return;
@@ -1064,7 +1059,7 @@
 
         authFetch(fileURL).then(async resp => {
             if (!resp.ok) {
-                const msg = currentLang === 'zh' ? '加载失败（' + resp.status + '）' : 'Failed to load (' + resp.status + ')';
+                const msg = httpErrorMsg(resp, '加载失败（' + resp.status + '）', 'Failed to load (' + resp.status + ')');
                 area.innerHTML = '<div class="error">' + msg + '</div>';
                 toast.error(msg);
                 return;
@@ -1151,7 +1146,7 @@
     function autoOpenDefault() {
         const candidates = ['README.md', 'readme.md', 'README.MD', 'index.html', 'README.txt', 'README'];
         for (const c of candidates) {
-            if (allFiles.some(f => f.path === c || f.path.endsWith('/' + c))) {
+            if (allFiles.some(f => f.path === c)) {
                 loadFile(c);
                 // 高亮文件树
                 const target = document.querySelector('.file-item[data-path="' + c + '"]');
@@ -1250,6 +1245,21 @@
         const minDock = document.getElementById('min-dock');
         if (!win) return;
 
+        // 同步真实 header 高度到 CSS 变量 --header-h，供 dock 侧栏顶部位置与标题栏高度对齐。
+        // viewer-header 高度随内容/字号变化，写死 52px 会让 dock 分隔线与页头下边框错位。
+        function syncHeaderH() {
+            const h = document.querySelector('.viewer-header');
+            if (!h) return;
+            const real = Math.round(h.getBoundingClientRect().height);
+            if (real > 0) document.documentElement.style.setProperty('--header-h', real + 'px');
+        }
+        syncHeaderH();
+        window.addEventListener('resize', syncHeaderH);
+        if (typeof ResizeObserver !== 'undefined') {
+            const h = document.querySelector('.viewer-header');
+            if (h) (new ResizeObserver(syncHeaderH)).observe(h);
+        }
+
         const pos = loadPos();
         const SNAP_DIST = 12;        // 元素边缘离视口边 ≤ 此值才吸附（像素）
         const DOCK_SIZE = 48;        // 迷你浮岛逻辑尺寸（与 CSS 一致；视觉缩放靠 transform）
@@ -1268,10 +1278,11 @@
         });
 
         // 监听窗口尺寸变化（resize 句柄）持久化
+        // 仅在浮窗态保存尺寸；docked 态的尺寸由 --dock-w/--dock-h 管理，不应覆盖浮窗尺寸
         if (window.ResizeObserver) {
             const ro = new ResizeObserver(entries => {
                 for (const en of entries) {
-                    if (!win.classList.contains('minimized')) {
+                    if (!win.classList.contains('minimized') && !win.classList.contains('docked')) {
                         savePos({ winWidth: en.contentRect.width, winHeight: en.contentRect.height });
                     }
                 }
@@ -1310,9 +1321,13 @@
             requestAnimationFrame(() => {
                 win.style.transition = 'transform 0.34s ' + EASE;
                 win.style.transform = base;      // 回到目标态
+                // 让 min-dock 图标在收缩接近收尾时淡入（minimize），
+                // 或淡出回复展开（restore）：旋转方向靠是否已 minimized
+                win.classList.add('morphing-icon-in');
             });
             const finish = () => {
                 win.classList.remove('morphing');
+                win.classList.remove('morphing-icon-in');
                 win.style.transition = '';
                 win.style.transform = '';
                 if (done) done();
@@ -1364,7 +1379,13 @@
             flipMorph(() => {
                 win.classList.remove('minimized', 'snapped', 'snap-left', 'snap-right', 'snap-top', 'snap-bottom');
                 // 恢复展开态位置：用户拖过的位置优先，否则回 CSS 默认（top:80 right:24）
-                if (pos.winLeft != null) {
+                const vw = window.innerWidth, vh = window.innerHeight;
+                const w = win.offsetWidth, h = win.offsetHeight;
+                // 校验保存位置仍在视口内（越界/横竖屏切换后会跑到屏外，特别是左上角）
+                const inView = pos.winLeft != null
+                    && pos.winLeft >= -w * 0.5 && pos.winLeft <= vw - w * 0.5
+                    && pos.winTop != null && pos.winTop >= 0 && pos.winTop <= vh - 40;
+                if (inView) {
                     win.style.left = pos.winLeft + 'px'; win.style.top = pos.winTop + 'px'; win.style.right = 'auto';
                 } else {
                     win.style.left = ''; win.style.top = ''; win.style.right = '';
@@ -1410,21 +1431,15 @@
             }
         }
         // 停靠时给内容区让位：左/右停靠留侧边 padding，底停靠留底部 padding。
-        // 同时给 viewer-header 让位，左/右停靠时标题栏也需要偏移。
+        // dock 窗口从 header 下方开始（top: var(--header-h)），不与 header 重叠，
+        // 因此只需给 content-area 让位，无需调整 header padding。
         // 用 px 直接设，宽度跟着浮窗实际尺寸走（resize 后由 ResizeObserver 同步）。
         function applyContentInset(side) {
             if (!contentArea) return;
             clearContentInset();
             const w = win.offsetWidth, h = win.offsetHeight;
-            const header = document.querySelector('.viewer-header');
-            if (side === 'left') {
-                contentArea.style.paddingLeft  = (w + 12) + 'px';
-                if (header) header.style.paddingLeft = (w + 12) + 'px';
-            }
-            if (side === 'right') {
-                contentArea.style.paddingRight = (w + 12) + 'px';
-                if (header) header.style.paddingRight = (w + 12) + 'px';
-            }
+            if (side === 'left')  contentArea.style.paddingLeft   = (w + 12) + 'px';
+            if (side === 'right') contentArea.style.paddingRight  = (w + 12) + 'px';
             if (side === 'bottom') contentArea.style.paddingBottom = (h + 12) + 'px';
         }
         function clearContentInset() {
@@ -1432,20 +1447,20 @@
             contentArea.style.paddingLeft = '';
             contentArea.style.paddingRight = '';
             contentArea.style.paddingBottom = '';
-            const header = document.querySelector('.viewer-header');
-            if (header) { header.style.paddingLeft = ''; header.style.paddingRight = ''; }
         }
 
         // ---- 停靠态拖边缘改宽/高 ----
-        // 鼠标靠近停靠浮窗的可拖拽边缘（8px 检测区）时启动 resize。
+        // 鼠标靠近停靠浮窗的可拖拽边缘（12px 检测区）时启动 resize。
         // 左停靠拖右边、右停靠拖左边、底停靠拖上边。
-        // 注意：cursor 仅在 3px border 上显示 ew/ns-resize，但检测区延伸到 8px 更易抓取。
+        // 注意：检测区 24px（触屏 32px）更易抓取；cursor 由 CSS ::after hot zone 提示。
         let resizing = false, resizeStart = 0, resizeStartSize = 0, resizeSide = null;
         function startResize(e) {
             if (!win.classList.contains('docked')) return;
             const side = pos.dockSide;
             const r = win.getBoundingClientRect();
-            const EDGE = 8; // 边缘可拖拽区域宽度
+            // 触屏用更宽的热区，桌面适度放宽
+            const isTouch = e && e.pointerType === 'touch';
+            const EDGE = isTouch ? 32 : 24;
             let canResize = false;
             if (side === 'left' && Math.abs(e.clientX - r.right) < EDGE) { canResize = true; resizeSide = 'ew'; resizeStart = e.clientX; resizeStartSize = r.width; }
             else if (side === 'right' && Math.abs(e.clientX - r.left) < EDGE) { canResize = true; resizeSide = 'ew'; resizeStart = e.clientX; resizeStartSize = r.width; }
@@ -1671,11 +1686,6 @@
                     lastClickItem = null;
                     return;
                 }
-                // 确保点击确实在 treeContent 内（防止事件穿透）
-                if (!treeContent.contains(e.target)) {
-                    lastClickItem = null;
-                    return;
-                }
                 const now = Date.now();
                 const x = e.clientX, y = e.clientY;
                 const sameItem = lastClickItem === item;
@@ -1697,7 +1707,6 @@
             // 桌面端 dblclick 兜底
             treeContent.addEventListener('dblclick', e => {
                 if (!e.target.closest('.file-item')) return;
-                if (!treeContent.contains(e.target)) return;
                 if (lastClickItem === null && lastClickTime === 0) return;
                 e.preventDefault();
                 e.stopPropagation();
@@ -1810,7 +1819,10 @@
             // 恢复上次停靠态（若存在）：展开偏好优先于停靠，但二者可共存——停靠本身也是展开
             if (pos.dockSide) {
                 win.classList.remove('minimized', 'snapped', 'snap-left', 'snap-right', 'snap-top', 'snap-bottom');
+                // 清除内联尺寸：docked 态宽度由 CSS var(--dock-w/--dock-h) 控制，
+                // 内联 width/height 会覆盖 CSS class 导致 resize 设置 --dock-w 无效
                 win.style.left = ''; win.style.top = ''; win.style.right = ''; win.style.bottom = '';
+                win.style.width = ''; win.style.height = '';
                 win.classList.add('docked', 'docked-' + pos.dockSide);
                 restoreDockSize();
                 applyContentInset(pos.dockSide);
@@ -1906,7 +1918,8 @@
 
         let loaded = false;
         let branches = [];
-        let open = false;
+
+        function isOpen() { return menu.classList.contains('open'); }
 
         function render() {
             if (!branches.length) {
@@ -1929,7 +1942,7 @@
             try {
                 const resp = await authFetch('/api/sites/' + pathID + '/branches');
                 if (!resp.ok) {
-                    const msg = zh ? '加载分支失败（' + resp.status + '）' : 'Failed to load branches (' + resp.status + ')';
+                    const msg = httpErrorMsg(resp, '加载分支失败（' + resp.status + '）', 'Failed to load branches (' + resp.status + ')');
                     menu.innerHTML = '<div class="branch-menu-error">' + msg + '</div>';
                     toast.error(msg);
                     return;
@@ -1958,22 +1971,20 @@
         }
 
         function openMenu() {
-            open = true;
             trigger.setAttribute('aria-expanded', 'true');
             menu.classList.add('open');
             if (!loaded) load();
             else render(); // 已加载过则刷新 active 高亮（currentRef 可能已切换）
         }
         function close() {
-            open = false;
             trigger.setAttribute('aria-expanded', 'false');
             menu.classList.remove('open');
         }
-        function toggle() { open ? close() : openMenu(); }
+        function toggle() { isOpen() ? close() : openMenu(); }
 
         trigger.addEventListener('click', (e) => { e.stopPropagation(); toggle(); });
-        document.addEventListener('click', (e) => { if (open && !menu.contains(e.target) && e.target !== trigger) close(); });
-        document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && open) close(); });
+        document.addEventListener('click', (e) => { if (isOpen() && !menu.contains(e.target) && e.target !== trigger) close(); });
+        document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && isOpen()) close(); });
     }
 
     // ---------- 启动 ----------
@@ -1981,8 +1992,7 @@
         initFloatingTree();
         initAutoHideHeader();
         initBranchSwitcher();
-        const restored = restoreAuthFromLocal();
-        logAuthState('DOMContentLoaded-restored=' + restored);
+        restoreAuthFromLocal();
         loadFileTree().then(autoOpenDefault);
 
         const refreshBtn = document.getElementById('refresh-tree-btn');

@@ -23,6 +23,10 @@ fetch:
   allow_hosts:
     - git.example.com   # 换成你自己的自托管实例域名
   deny_hosts: []
+  # Rate limit: requests per minute per host. Default 100 (≈6000 req/hour).
+  # Limits external Git API calls (GitHub/GitLab/Gitea) to avoid abuse.
+  # 限流：每分钟对每个 Git 平台（host）的请求上限，默认 100。
+  rate_limit: 100
 
 sites:
   - git_url: https://github.com/fimreal/gitweb.git
