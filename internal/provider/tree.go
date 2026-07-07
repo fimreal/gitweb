@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 )
@@ -202,18 +201,8 @@ func fetchGiteaTree(ctx context.Context, client *http.Client, b providerBase, gi
 	}
 	if resp.StatusCode != 200 {
 		body, _ := io.ReadAll(resp.Body)
-		bodySnippet := string(body)
-		if len(bodySnippet) > 500 { bodySnippet = bodySnippet[:500] }
-		log.Printf("[gitea-diag] tree FAIL status=%d url=%s body=%s", resp.StatusCode, apiURL, bodySnippet)
 		return nil, fmt.Errorf("gitea api returned %d: %s", resp.StatusCode, string(body))
 	}
-
-	log.Printf("[gitea-diag] tree 200 OK url=%s authType=%s", apiURL, func() string {
-		if auth == nil { return "none" }
-		if auth.Token != "" { return "token" }
-		if auth.Username != "" { return "basic(" + auth.Username + ")" }
-		return "empty"
-	}())
 
 	var result struct {
 		Tree []struct {
@@ -224,7 +213,6 @@ func fetchGiteaTree(ctx context.Context, client *http.Client, b providerBase, gi
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		log.Printf("[gitea-diag] tree JSON decode FAIL: %v", err)
 		return nil, fmt.Errorf("gitea tree json decode failed: %v", err)
 	}
 

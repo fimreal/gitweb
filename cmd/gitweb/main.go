@@ -60,8 +60,7 @@ func main() {
 				MaxFileSize: 5 * 1024 * 1024,
 			},
 			Fetch: config.FetchConfig{
-				Timeout:   10 * time.Second,
-				HTTPSOnly: false,
+				Timeout: 10 * time.Second,
 			},
 		}
 	}
@@ -137,7 +136,7 @@ func main() {
 	cacheMgr := cache.New(cfg.Cache.TTL, cfg.Cache.MaxEntries)
 	renderer := render.New()
 
-	srv := server.New(reg, providerMgr, cacheMgr, renderer, cfg.BaseURL, cfg.Cache.MaxFileSize, cfg.Password)
+	srv := server.New(reg, providerMgr, cacheMgr, renderer, cfg.BaseURL, cfg.Password)
 
 	r := srv.SetupRoutes()
 

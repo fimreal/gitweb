@@ -183,7 +183,6 @@ cache:
   max_file_size: 5MB
 fetch:
   timeout: 10s
-  https_only: true
 admin_token: ""                        # 注册/管理 API 鉴权
 sites:                                  # 启动时预置站点
   - git_url: https://github.com/username/helloworld

@@ -72,10 +72,6 @@ func hasAuth(a *Auth) bool {
 	return a != nil && (a.Token != "" || a.Username != "")
 }
 
-type Provider interface {
-	Fetch(ctx context.Context, gitURL, ref, filepath string, auth *Auth) ([]byte, error)
-}
-
 type Manager struct {
 	client     *http.Client
 	sf         singleflight.Group
@@ -150,19 +146,17 @@ func (m *Manager) Fetch(ctx context.Context, providerType, gitURL, ref, filepath
 	key := fmt.Sprintf("%s:%s:%s:%s", providerType, gitURL, ref, filepath)
 
 	v, err, _ := m.sf.Do(key, func() (interface{}, error) {
-		var p Provider
 		base := providerBase{allow: m.allow, deny: m.deny, maxSize: m.maxSize}
 		switch providerType {
 		case "github":
-			p = &GitHubProvider{client: m.client, providerBase: base}
+			return (&GitHubProvider{client: m.client, providerBase: base}).Fetch(ctx, gitURL, ref, filepath, auth)
 		case "gitlab":
-			p = &GitLabProvider{client: m.client, providerBase: base}
+			return (&GitLabProvider{client: m.client, providerBase: base}).Fetch(ctx, gitURL, ref, filepath, auth)
 		case "gitea":
-			p = &GiteaProvider{client: m.client, providerBase: base}
+			return (&GiteaProvider{client: m.client, providerBase: base}).Fetch(ctx, gitURL, ref, filepath, auth)
 		default:
-			p = &GenericProvider{client: m.client, providerBase: base}
+			return nil, fmt.Errorf("unsupported provider type: %s", providerType)
 		}
-		return p.Fetch(ctx, gitURL, ref, filepath, auth)
 	})
 
 	if err != nil {
@@ -410,15 +404,6 @@ func parseGiteaURL(gitURL string) (scheme, host, owner, repo string, err error) 
 	owner = parts[0]
 	repo = strings.TrimSuffix(parts[1], ".git")
 	return scheme, host, owner, repo, nil
-}
-
-type GenericProvider struct {
-	client *http.Client
-	providerBase
-}
-
-func (p *GenericProvider) Fetch(ctx context.Context, gitURL, ref, filepath string, auth *Auth) ([]byte, error) {
-	return nil, errors.New("generic provider not yet implemented")
 }
 
 // IdentifyProvider 识别 Git URL 的提供商类型。

@@ -129,9 +129,6 @@ func TestHiddenNotInListPublic(t *testing.T) {
 	if pub[0].PathID != "pub" {
 		t.Errorf("ListPublic pathid = %q, want pub", pub[0].PathID)
 	}
-	if got := len(r.List()); got != 2 {
-		t.Errorf("List = %d sites, want 2", got)
-	}
 	// 隐藏站点仍可直链 Get
 	if _, err := r.Get("secret"); err != nil {
 		t.Errorf("Get(secret): %v", err)

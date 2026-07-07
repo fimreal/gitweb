@@ -739,7 +739,8 @@
                 sessionStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
                 // 恢复持久凭据时也补一份 cookie
                 var cookieVal = btoa(unescape(encodeURIComponent(JSON.stringify(saved))));
-                document.cookie = 'gitweb_repo_auth_' + pathID + '=' + cookieVal + '; path=/; max-age=' + (SAVE_DAYS * 86400) + '; SameSite=Lax';
+                var secure = location.protocol === 'https:' ? '; Secure' : '';
+                document.cookie = 'gitweb_repo_auth_' + pathID + '=' + cookieVal + '; path=/; max-age=' + (SAVE_DAYS * 86400) + '; SameSite=Lax' + secure;
                 return true;
             }
             if (saved) localStorage.removeItem(STORAGE_KEY_LOCAL);
@@ -754,7 +755,8 @@
         var cookieName = 'gitweb_repo_auth_' + pathID;
         var cookieVal = btoa(unescape(encodeURIComponent(JSON.stringify(auth))));
         var maxAge = persist ? (SAVE_DAYS * 86400) : (4 * 3600); // 持久 7 天，会话 4 小时
-        document.cookie = cookieName + '=' + cookieVal + '; path=/; max-age=' + maxAge + '; SameSite=Lax';
+        var secure = location.protocol === 'https:' ? '; Secure' : '';
+        document.cookie = cookieName + '=' + cookieVal + '; path=/; max-age=' + maxAge + '; SameSite=Lax' + secure;
         if (persist) {
             auth.expiresAt = Date.now() + SAVE_DAYS * 86400000;
             localStorage.setItem(STORAGE_KEY_LOCAL, JSON.stringify(auth));
@@ -766,7 +768,8 @@
     function clearAllAuth() {
         localStorage.removeItem(STORAGE_KEY_LOCAL);
         sessionStorage.removeItem(STORAGE_KEY);
-        document.cookie = 'gitweb_repo_auth_' + pathID + '=; path=/; max-age=0';
+        var secure = location.protocol === 'https:' ? '; Secure' : '';
+        document.cookie = 'gitweb_repo_auth_' + pathID + '=; path=/; max-age=0' + secure;
     }
     // 检查是否有有效的持久凭据（用于预填勾选框 & 站点信息展示）
     function getSavedAuthInfo() {
@@ -797,7 +800,8 @@
             const prevAuth = getStoredAuth();
             sessionStorage.removeItem(STORAGE_KEY);
             // 后端若失败，也清掉兜底 cookie，避免持续误导下次导航请求
-            document.cookie = 'gitweb_repo_auth_' + pathID + '=; path=/; max-age=0';
+            var secure = location.protocol === 'https:' ? '; Secure' : '';
+            document.cookie = 'gitweb_repo_auth_' + pathID + '=; path=/; max-age=0' + secure;
             authFailed = !!prevAuth;
             lastFailedType = prevAuth ? prevAuth.type : null;
             const auth = await promptAuth();
