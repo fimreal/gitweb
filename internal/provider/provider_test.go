@@ -12,7 +12,7 @@ import (
 // newTestManager 创建一个允许 127.0.0.1（httptest）的 Manager，用于模拟远端。
 func newTestManager(t *testing.T, maxSize int64) *Manager {
 	t.Helper()
-	return NewManager(0, "", "", []string{"127.0.0.1", "localhost"}, nil, maxSize)
+	return NewManager(0, "", "", []string{"127.0.0.1", "localhost"}, nil, maxSize, 0)
 }
 
 // ----- 纯函数：URL 解析与 SSRF -----
@@ -188,7 +188,7 @@ func TestFetchTooLarge(t *testing.T) {
 
 func TestFetchSSRFBlocked(t *testing.T) {
 	// 不在 allow 列表的私网地址应被拒绝（不发起请求）
-	m := NewManager(0, "", "", nil, nil, 1<<20) // 无 allow，默认拒私网
+	m := NewManager(0, "", "", nil, nil, 1<<20, 0) // 无 allow，默认拒私网
 	_, err := m.Fetch(context.Background(), "gitea", "http://127.0.0.1:9/o/repo", "main", "f.txt", nil)
 	if err == nil {
 		t.Fatal("expected SSRF rejection, got nil")
@@ -311,7 +311,7 @@ func TestIdentifyProviderSSRFBlocked(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	m := NewManager(0, "", "", nil, nil, 1<<20) // 无 allow，默认拒私网
+	m := NewManager(0, "", "", nil, nil, 1<<20, 0) // 无 allow，默认拒私网
 	got := m.IdentifyProvider(srv.URL + "/o/repo") // httptest 是 127.0.0.1
 	if got != "" {
 		t.Fatalf("expected empty (SSRF blocked), got %q", got)

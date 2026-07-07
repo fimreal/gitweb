@@ -46,7 +46,6 @@ type Server struct {
 	cache          *cache.Cache
 	renderer       *render.Renderer
 	baseURL        string
-	maxFileSize    int64
 	password       string
 	sessions       sync.Map
 	sessionExpiry  time.Duration
@@ -64,14 +63,13 @@ type loginFailEntry struct {
 	lockoutUntil time.Time
 }
 
-func New(reg *registry.Registry, prov *provider.Manager, c *cache.Cache, rend *render.Renderer, baseURL string, maxFileSize int64, password string) *Server {
+func New(reg *registry.Registry, prov *provider.Manager, c *cache.Cache, rend *render.Renderer, baseURL string, password string) *Server {
 	return &Server{
 		registry:       reg,
 		provider:       prov,
 		cache:          c,
 		renderer:       rend,
 		baseURL:        baseURL,
-		maxFileSize:    maxFileSize,
 		password:       password,
 		sessionExpiry:  30 * 24 * time.Hour,
 		loginRateLimit: 5 * time.Minute,
@@ -443,15 +441,6 @@ func (s *Server) handleGetTree(c *gin.Context) {
 
 	// 凭据从请求头透传（运行时输入，存浏览器 sessionStorage），用完即弃。
 	auth := authFromHeader(c, site.Auth)
-	// 临时诊断：打印收到的 auth 类型（不打印凭据本身）
-	authType := "none"
-	if auth != nil {
-		authType = auth.Type
-		if auth.Type == "basic" {
-			authType = "basic(user=" + auth.Username + ")"
-		}
-	}
-	log.Printf("[auth-diag] tree pathid=%s authType=%s authHeader=%q", pathID, authType, c.GetHeader("Authorization")[:0]+"(len="+fmt.Sprint(len(c.GetHeader("Authorization")))+")")
 
 	// ?ref= 用于 viewer 临时切换分支：覆盖 site.Ref，但不写入 state。
 	ref := effectiveRef(c, site.Ref)

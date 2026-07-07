@@ -14,7 +14,6 @@ cache:
 
 fetch:
   timeout: 10s
-  https_only: false
   http_proxy: ""   # e.g., http://10.0.0.1:7890
   https_proxy: ""  # e.g., http://10.0.0.1:7890
   # SSRF: allow/deny wildcards (*.gitea.*). Private/loopback/link-local IPs

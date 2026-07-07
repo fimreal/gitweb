@@ -74,9 +74,7 @@ cache:
 
 fetch:
   timeout: 10s
-  https_only: false
   # SSRF 防护：不匹配 allow/deny 规则的私网主机默认会被拦截。
-  # 当 https_only 为 true 时，allow_hosts 默认包含 github.com / gitlab.com / *.gitea.*。
   allow_hosts: []
   deny_hosts: []
 

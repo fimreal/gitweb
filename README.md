@@ -74,9 +74,7 @@ cache:
 
 fetch:
   timeout: 10s
-  https_only: false
   # SSRF protection: hosts not matching allow/deny rules are blocked if private.
-  # allow_hosts defaults to github.com / gitlab.com / *.gitea.* when https_only is true.
   allow_hosts: []
   deny_hosts: []
 

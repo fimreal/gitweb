@@ -23,15 +23,14 @@ type Auth struct {
 }
 
 type Site struct {
-	PathID     string
-	GitURL     string
-	Ref        string
-	Auth       *Auth
-	Provider   string
-	DefaultDoc string
-	CreatedAt  time.Time
-	Views      int64 // 站点被打开（viewer 页面）的次数；内存累加，防抖落盘
-	Hidden     bool // 仅创建时可设。true=不进公开 /api/sites 列表，直链 /{pathid}/ 仍可访问
+	PathID    string
+	GitURL    string
+	Ref       string
+	Auth      *Auth
+	Provider  string
+	CreatedAt time.Time
+	Views     int64 // 站点被打开（viewer 页面）的次数；内存累加，防抖落盘
+	Hidden    bool // 仅创建时可设。true=不进公开 /api/sites 列表，直链 /{pathid}/ 仍可访问
 }
 
 type Registry struct {
@@ -222,17 +221,6 @@ func (r *Registry) Get(pathID string) (*Site, error) {
 		return nil, ErrNotFound
 	}
 	return site, nil
-}
-
-func (r *Registry) List() []*Site {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	sites := make([]*Site, 0, len(r.sites))
-	for _, s := range r.sites {
-		sites = append(sites, s)
-	}
-	return sites
 }
 
 // ListPublic 返回未标记为隐藏的站点，用于公开的 /api/sites 列表。

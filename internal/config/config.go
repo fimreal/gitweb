@@ -25,7 +25,6 @@ type CacheConfig struct {
 
 type FetchConfig struct {
 	Timeout    time.Duration `yaml:"timeout"`
-	HTTPSOnly  bool          `yaml:"https_only"`
 	HTTPProxy  string        `yaml:"http_proxy"`
 	HTTPSProxy string        `yaml:"https_proxy"`
 	AllowHosts []string      `yaml:"allow_hosts"`
@@ -99,11 +98,6 @@ func setDefaults(cfg *Config) {
 		}
 	}
 	
-	if cfg.Fetch.HTTPSOnly {
-		if len(cfg.Fetch.AllowHosts) == 0 {
-			cfg.Fetch.AllowHosts = []string{"github.com", "gitlab.com", "*.gitea.*"}
-		}
-	}
 	for i := range cfg.Sites {
 		if cfg.Sites[i].Ref == "" {
 			cfg.Sites[i].Ref = "main"
