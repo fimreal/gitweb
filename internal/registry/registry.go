@@ -268,6 +268,27 @@ func (r *Registry) Remove(pathID string) error {
 	return nil
 }
 
+// SetHidden 切换站点的公开/隐藏状态。hidden=true 时站点不进入 /api/sites 列表，
+// 但直链 /{pathid}/ 仍可访问。变更后立即落盘。
+func (r *Registry) SetHidden(pathID string, hidden bool) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	site, ok := r.sites[pathID]
+	if !ok {
+		return ErrNotFound
+	}
+	site.Hidden = hidden
+
+	if r.store != nil {
+		if err := r.store.Save(r.snapshot()); err != nil {
+			log.Printf("registry: failed to persist state: %v", err)
+		}
+	}
+
+	return nil
+}
+
 func generatePathID() string {
 	b := make([]byte, 5)
 	rand.Read(b)

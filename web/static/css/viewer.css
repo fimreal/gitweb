@@ -354,6 +354,58 @@ body {
     word-break: break-all;
     line-height: 1.45;
 }
+/* 站点信息弹窗里的可见性开关 */
+.info-row.info-row-toggle dd {
+    display: flex;
+    align-items: center;
+}
+.visibility-toggle-inline {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+    user-select: none;
+}
+.visibility-toggle-inline input[type="checkbox"] {
+    position: absolute;
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+.visibility-toggle-inline .vt-switch {
+    position: relative;
+    width: 36px;
+    height: 20px;
+    background: var(--border);
+    border-radius: 999px;
+    transition: background 0.2s ease;
+    flex-shrink: 0;
+}
+.visibility-toggle-inline .vt-thumb {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 16px;
+    height: 16px;
+    background: #fff;
+    border-radius: 50%;
+    transition: transform 0.2s ease;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+}
+.visibility-toggle-inline input:checked + .vt-switch {
+    background: var(--accent);
+}
+.visibility-toggle-inline input:checked + .vt-switch .vt-thumb {
+    transform: translateX(16px);
+}
+.visibility-toggle-inline .vt-label {
+    font-size: 13px;
+    color: var(--secondary);
+    transition: color 0.15s ease;
+}
+.visibility-toggle-inline:hover .vt-label {
+    color: var(--fg);
+}
 
 .content-area {
     flex: 1;

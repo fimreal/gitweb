@@ -80,6 +80,7 @@ func New(reg *registry.Registry, prov *provider.Manager, c *cache.Cache, rend *r
 }
 
 func (s *Server) SetupRoutes() *gin.Engine {
+	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
 
 	r.Use(s.authMiddleware())
@@ -99,6 +100,7 @@ func (s *Server) SetupRoutes() *gin.Engine {
 		api.POST("/sites/:pathid/refresh", s.handleRefreshSite)
 		api.GET("/sites/:pathid/tree", s.handleGetTree)
 		api.GET("/sites/:pathid/branches", s.handleListBranches)
+		api.PATCH("/sites/:pathid/hidden", s.handleSetHidden)
 	}
 
 	// /:pathid/*filepath 同时承载 viewer 页面（空 filepath）与文件内容（有 filepath）。
@@ -410,6 +412,26 @@ func (s *Server) handleRefreshSite(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "refreshed"})
 }
 
+func (s *Server) handleSetHidden(c *gin.Context) {
+	pathID := c.Param("pathid")
+	var req struct {
+		Hidden bool `json:"hidden"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err := s.registry.SetHidden(pathID, req.Hidden); err != nil {
+		if errors.Is(err, registry.ErrNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "site not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"hidden": req.Hidden})
+}
+
 func (s *Server) handleGetTree(c *gin.Context) {
 	pathID := c.Param("pathid")
 
@@ -517,6 +539,7 @@ func (s *Server) handleSiteFile(c *gin.Context) {
 			"RepoName":   repoNameFromURL(site.GitURL),
 			"Views":      site.Views + 1, // +1 包含本次访问
 			"Nonce":      nonce,
+			"Hidden":     site.Hidden,
 		})
 		return
 	}
