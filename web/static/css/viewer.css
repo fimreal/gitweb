@@ -428,10 +428,13 @@ body {
 /* 拖动中：关过渡，保证跟手；FLIP 形变期间也临时关过渡（由 JS 用 transform 接管） */
 .floating-tree-window.dragging { transition: none; box-shadow: var(--shadow-xl); }
 .floating-tree-window.morphing { transition: none; }
-/* FLIP 动画期间隐藏 min-dock 内容：避免 SVG 跟随 scale 被放大闪现 */
-.floating-tree-window.morphing .min-dock { visibility: hidden; }
+/* FLIP 形变期间：标题栏/正文内容隐藏，让"边框缩小→图标"的视觉聚焦在形变本身；
+   min-dock 图标淡入而非立即出现，避免 SVG 与 scale 叠加放大的闪现。 */
 .floating-tree-window.morphing .floating-tree-titlebar,
 .floating-tree-window.morphing .floating-tree-content { visibility: hidden; }
+.floating-tree-window.morphing .min-dock { visibility: visible; opacity: 0; transition: none; }
+/* Play 帧（JS 同步添加 morphing-icon-in）让图标在形变接近收尾时显形 */
+.floating-tree-window.morphing.morphing-icon-in .min-dock { opacity: 1; transition: opacity 0.12s ease; }
 
 /* ---- 迷你浮岛态：逻辑尺寸固定 48，靠 transform 缩放，不 reflow ---- */
 .floating-tree-window.minimized {
@@ -680,34 +683,44 @@ body {
     position: fixed;
     border-radius: 0;
     animation: none;
+    resize: none; /* docked 态用自定义边缘拖拽，禁用浏览器原生 resize 句柄 */
+    /* 无缝侧栏：去掉浮窗毛玻璃/阴影，与正文同背景嵌入页面骨架 */
+    background: var(--bg);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    border: none;
+    box-shadow: none;
 }
 .floating-tree-window.docked .floating-tree-titlebar { cursor: grab; }
 .floating-tree-window.docked .min-dock { display: none; }
-/* 停靠态标题栏：顶部 padding 与 viewer-header 一致(14px)，让两侧标题视觉对齐 */
-.floating-tree-window.docked .floating-tree-titlebar { padding: 14px 10px 14px 24px; }
+/* 停靠态标题栏：与 viewer-header 同高（--header-h）对齐，同色毛玻璃贯通 */
+.floating-tree-window.docked .floating-tree-titlebar {
+    height: var(--header-h, 52px);
+    padding: 0 10px 0 16px;
+    background: var(--glass-bg);
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(160%);
+    backdrop-filter: blur(var(--glass-blur)) saturate(160%);
+    border-bottom: 1px solid var(--border);
+}
 .floating-tree-window.docked .floating-tree-titlebar h3 { font-size: 13px; }
 
-/* 左停靠：贴左缘全高，右侧可拖拽调宽 */
+/* 左停靠：贴左缘，从 header 下方到底部全高，右侧可拖拽调宽 */
 .floating-tree-window.docked-left {
-    top: 0 !important; bottom: 0 !important; left: 0 !important; right: auto !important;
+    top: var(--header-h, 52px) !important; bottom: 0 !important; left: 0 !important; right: auto !important;
     width: var(--dock-w, 300px); max-width: 60vw; min-width: 180px;
     height: auto !important; max-height: none;
     border-radius: 0;
     border-left: none;
     border-right: 1px solid var(--border);
-    box-shadow: 4px 0 10px rgba(15, 23, 42, 0.04);
-    cursor: ew-resize;
 }
-/* 右停靠：贴右缘全高，左侧可拖拽调宽 */
+/* 右停靠：贴右缘，从 header 下方到底部全高，左侧可拖拽调宽 */
 .floating-tree-window.docked-right {
-    top: 0 !important; bottom: 0 !important; right: 0 !important; left: auto !important;
+    top: var(--header-h, 52px) !important; bottom: 0 !important; right: 0 !important; left: auto !important;
     width: var(--dock-w, 300px); max-width: 60vw; min-width: 180px;
     height: auto !important; max-height: none;
     border-radius: 0;
     border-right: none;
     border-left: 1px solid var(--border);
-    box-shadow: -4px 0 10px rgba(15, 23, 42, 0.04);
-    cursor: ew-resize;
 }
 /* 底停靠：贴底部全宽，上侧可拖拽调高 */
 .floating-tree-window.docked-bottom {
@@ -717,20 +730,6 @@ body {
     border-radius: 0;
     border-bottom: none;
     border-top: 1px solid var(--border);
-    box-shadow: 0 -4px 10px rgba(15, 23, 42, 0.04);
-    cursor: ns-resize;
-}
-[data-theme="dark"] .floating-tree-window.docked-left,
-:root:not([data-theme="light"]) .floating-tree-window.docked-left {
-    box-shadow: 4px 0 10px rgba(0, 0, 0, 0.35);
-}
-[data-theme="dark"] .floating-tree-window.docked-right,
-:root:not([data-theme="light"]) .floating-tree-window.docked-right {
-    box-shadow: -4px 0 10px rgba(0, 0, 0, 0.35);
-}
-[data-theme="dark"] .floating-tree-window.docked-bottom,
-:root:not([data-theme="light"]) .floating-tree-window.docked-bottom {
-    box-shadow: 0 -4px 10px rgba(0, 0, 0, 0.35);
 }
 /* 停靠态内部元素恢复默认 cursor（只有边缘是 resize） */
 .floating-tree-window.docked .floating-tree-titlebar,
@@ -738,6 +737,23 @@ body {
 .floating-tree-window.docked .floating-tree-btn { cursor: default; }
 .floating-tree-window.docked .floating-tree-titlebar { cursor: grab; }
 .floating-tree-window.docked .floating-tree-titlebar:active { cursor: grabbing; }
+
+/* 停靠态拖拽热区：用一个透明 ::after 贴在可拖拽边缘，hover 时显 cursor。
+   不影响布局，仅作为命中区与视觉提示。 */
+.floating-tree-window.docked::after {
+    content: '';
+    position: absolute;
+    z-index: 2;
+    pointer-events: auto;
+    background: transparent;
+    transition: background 0.15s ease;
+}
+.floating-tree-window.docked-left::after  { top: 0; right: 0; bottom: 0; width: 7px; cursor: ew-resize; transform: translateX(3px); }
+.floating-tree-window.docked-right::after  { top: 0; left: 0; bottom: 0; width: 7px; cursor: ew-resize; transform: translateX(-3px); }
+.floating-tree-window.docked-bottom::after{ left: 0; right: 0; top: 0; height: 7px; cursor: ns-resize; transform: translateY(-3px); }
+.floating-tree-window.docked-left:hover::after,
+.floating-tree-window.docked-right:hover::after { background: var(--accent-soft); }
+.floating-tree-window.docked-bottom:hover::after { background: var(--accent-soft); }
 @media (prefers-reduced-motion: reduce) {
     .floating-tree-window.docked { transition: none; }
 }

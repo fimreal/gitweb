@@ -1,5 +1,7 @@
 # gitweb
 
+English | [中文](README.zh.md)
+
 Transform git repositories into browsable web pages.
 
 ## Features
@@ -10,12 +12,14 @@ Transform git repositories into browsable web pages.
 - **Private repositories**: When a repo requires auth, the viewer prompts for a token or username/password at access time. Credentials stay in the browser (sessionStorage) and are sent per-request — never stored on the server
 - **Optional site password**: Set a password in config / via `-password` flag to require login before any page can be accessed. Not set = public (default).
 - **File tree**: Floating, draggable file browser to navigate the repo
-- **Single binary**: Web assets (templates, CSS, JS) are embedded. Drop the binary anywhere — no `web/` directory needed.
+- **Single binary**: Web assets (templates, CSS, JS) are embedded into the Go binary via `//go:embed`. The released tarball and Docker image contain only the binary — no external `web/` directory is needed.
 - **In-memory caching**: LRU + TTL cache; restart clears everything (stateless)
 - **Security**: SSRF protection (private/loopback hosts blocked), file-size limits via streaming, strict CSP, sandboxed HTML rendering
 - **Responsive UI**: Dark mode and bilingual (EN/中文)
 
 ## Quick Start
+
+### Build from source
 
 ```bash
 # Build
@@ -32,6 +36,21 @@ go build -o gitweb ./cmd/gitweb
 
 # Require a password to access the site
 ./gitweb --password your-secret
+```
+
+### Run with Docker
+
+```bash
+# Using the pre-built image
+docker run -d -p 8080:8080 \
+  -v $(pwd)/config.yaml:/app/config.yaml:ro \
+  --name gitweb \
+  ${DOCKERHUB_USERNAME}/gitweb:latest \
+  /app/gitweb --config /app/config.yaml
+
+# Or build locally
+docker build -t gitweb .
+docker run -d -p 8080:8080 gitweb
 ```
 
 Visit `http://localhost:8080` to register repositories.
@@ -65,7 +84,7 @@ sites:
   - git_url: https://github.com/username/repo
     pathid: mysite
     ref: main
-    hidden: false  # true = 不进公开站点列表，仅靠直链 /mysite/ 访问
+    hidden: false  # true = not listed on the public site list; only accessible via direct link /mysite/
     # auth is optional and only for preloaded private repos. For runtime-registered
     # repos, credentials are entered in the browser when the repo is opened.
     auth:
@@ -140,6 +159,7 @@ Long plain-text files are paginated client-side.
 - **Site password** (optional): If `password` is set (config or `-password` flag), a cookie-based login gates every page. `/login`, `/logout`, `/healthz`, and `/static/*` remain public so the login page can render.
 - **SSRF protection**: `allow_hosts`/`deny_hosts` (wildcards supported); private/loopback/link-local IPs blocked by default.
 - **File size**: Streamed via `io.LimitReader` — oversized files are rejected before filling memory.
+- **Rate limiting**: Per-host token bucket limits external Git API calls (default 100 req/min per host, configurable via `fetch.rate_limit`). Prevents abuse and avoids hitting upstream API rate limits (e.g., GitHub's 60 req/hour for unauthenticated requests).
 - **CSP + sandbox**: Viewer pages send a strict Content-Security-Policy; user `.html` is rendered in `<iframe sandbox="allow-same-origin">` (no `allow-scripts`) to stop untrusted scripts.
 - **Credentials**: Only in the browser (sessionStorage), sent per-request via `Authorization`; never stored on disk, never logged, never returned by the list API.
 

@@ -56,14 +56,11 @@ jobs:
           go build -trimpath -ldflags="-s -w -X main.version=${GITHUB_REF_NAME:-dev}" \
             -o dist/gitweb${{ matrix.ext }} ./cmd/gitweb
 
-      # web/ ships next to the binary (assets are runtime-loaded, not embedded)
-      - name: Bundle web assets
+      # Static assets are embedded into the binary via //go:embed; no extra web/ directory needed.
+      - name: Package binary
         run: |
           cd dist
-          mkdir -p out/web
-          mv gitweb${{ matrix.ext }} out/
-          cp -r ../web out/
-          tar -czf gitweb-${{ matrix.os }}-${{ matrix.arch }}.tar.gz -C out .
+          tar -czf gitweb-${{ matrix.os }}-${{ matrix.arch }}.tar.gz gitweb${{ matrix.ext }}
 
       - uses: actions/upload-artifact@v4
         with:

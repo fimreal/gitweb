@@ -98,7 +98,7 @@ func main() {
 		}
 	}
 	providerMgr := provider.NewManager(cfg.Fetch.Timeout, cfg.Fetch.HTTPProxy, cfg.Fetch.HTTPSProxy,
-		cfg.Fetch.AllowHosts, cfg.Fetch.DenyHosts, cfg.Cache.MaxFileSize)
+		cfg.Fetch.AllowHosts, cfg.Fetch.DenyHosts, cfg.Cache.MaxFileSize, cfg.Fetch.RateLimit)
 
 	for _, siteSpec := range cfg.Sites {
 		// 与已加载的 state 合并：预置站点若已存在则跳过，既不重复也不触发写入。
