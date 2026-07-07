@@ -222,6 +222,16 @@
                 <div class="info-row"><dt data-en="Auth" data-zh="凭据">凭据</dt><dd id="info-auth"></dd></div>
                 <div class="info-row"><dt data-en="Created" data-zh="创建时间">创建时间</dd><dd id="info-created"></dd></div>
                 <div class="info-row"><dt data-en="Views" data-zh="浏览次数">浏览次数</dt><dd id="info-views"></dd></div>
+                <div class="info-row info-row-toggle">
+                    <dt data-en="Visibility" data-zh="可见性">可见性</dt>
+                    <dd>
+                        <label class="visibility-toggle-inline">
+                            <input type="checkbox" id="info-hidden-toggle">
+                            <span class="vt-switch"><span class="vt-thumb"></span></span>
+                            <span class="vt-label" id="info-hidden-label"></span>
+                        </label>
+                    </dd>
+                </div>
             </dl>
             <div class="auth-actions">
                 <button id="info-close" class="primary" data-en="Close" data-zh="关闭">关闭</button>
@@ -522,17 +532,32 @@
 
     // ---------- 站点信息弹窗 ----------
     const siteInfo = {
+        pathID: '{{ .PathID }}',
         gitUrl: '{{ .GitURL }}',
         provider: '{{ .Provider }}',
         ref: '{{ .Ref }}',
         hasPresetAuth: {{ if .HasPresetAuth }}true{{ else }}false{{ end }},
         createdAt: '{{ .CreatedAt }}',
-        views: {{ .Views }}
+        views: {{ .Views }},
+        hidden: {{ if .Hidden }}true{{ else }}false{{ end }}
     };
 
     function initSiteInfo() {
         const btn = document.getElementById('site-info-btn');
         if (!btn) return;
+        const hiddenToggle = document.getElementById('info-hidden-toggle');
+        const hiddenLabel = document.getElementById('info-hidden-label');
+
+        function updateHiddenLabel() {
+            if (!hiddenLabel) return;
+            const hidden = hiddenToggle ? hiddenToggle.checked : siteInfo.hidden;
+            if (currentLang === 'zh') {
+                hiddenLabel.textContent = hidden ? '隐藏（仅直链访问）' : '公开（出现在站点列表）';
+            } else {
+                hiddenLabel.textContent = hidden ? 'Hidden (link only)' : 'Public (listed in sites)';
+            }
+        }
+
         btn.addEventListener('click', () => {
             document.getElementById('info-giturl').textContent = siteInfo.gitUrl || '—';
             document.getElementById('info-provider').textContent = siteInfo.provider || '—';
@@ -554,9 +579,38 @@
             document.getElementById('info-auth').textContent = authTxt;
             document.getElementById('info-created').textContent = siteInfo.createdAt || '—';
             document.getElementById('info-views').textContent = siteInfo.views;
+            if (hiddenToggle) {
+                hiddenToggle.checked = siteInfo.hidden;
+                updateHiddenLabel();
+            }
             document.getElementById('info-modal').style.display = 'flex';
             closeSettings();
         });
+
+        if (hiddenToggle) {
+            hiddenToggle.addEventListener('change', async () => {
+                const hidden = hiddenToggle.checked;
+                updateHiddenLabel();
+                try {
+                    const resp = await fetch('/api/sites/' + siteInfo.pathID + '/hidden', {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ hidden: hidden })
+                    });
+                    if (!resp.ok) {
+                        const data = await resp.json().catch(() => ({}));
+                        throw new Error(data.error || 'HTTP ' + resp.status);
+                    }
+                    siteInfo.hidden = hidden;
+                    toast.success(currentLang === 'zh' ? '已更新' : 'Updated');
+                } catch (err) {
+                    hiddenToggle.checked = siteInfo.hidden;
+                    updateHiddenLabel();
+                    toast.error(currentLang === 'zh' ? '更新失败: ' + err.message : 'Failed: ' + err.message);
+                }
+            });
+        }
+
         const closeBtn = document.getElementById('info-close');
         if (closeBtn) closeBtn.addEventListener('click', () => {
             document.getElementById('info-modal').style.display = 'none';
