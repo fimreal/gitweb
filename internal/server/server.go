@@ -59,12 +59,17 @@ type sessionEntry struct {
 }
 
 type loginFailEntry struct {
-	count    int
+	count        int
 	lockoutUntil time.Time
 }
 
+// loginFailGracePeriod 是登录失败条目在锁定过期后仍保留的宽限期。
+// 期间条目不再阻塞登录，但保留计数用于"连续失败才锁定"的判定；
+// 超过宽限期未再失败则被清理 goroutine 删除，避免 sync.Map 无限增长。
+const loginFailGracePeriod = time.Hour
+
 func New(reg *registry.Registry, prov *provider.Manager, c *cache.Cache, rend *render.Renderer, baseURL string, password string) *Server {
-	return &Server{
+	s := &Server{
 		registry:       reg,
 		provider:       prov,
 		cache:          c,
@@ -74,6 +79,29 @@ func New(reg *registry.Registry, prov *provider.Manager, c *cache.Cache, rend *r
 		sessionExpiry:  30 * 24 * time.Hour,
 		loginRateLimit: 5 * time.Minute,
 		loginMaxFails:  10,
+	}
+	// 仅在启用密码层时启动登录失败条目的过期清理，避免 sync.Map 无限增长。
+	if password != "" {
+		go s.cleanLoginFailures()
+	}
+	return s
+}
+
+// cleanLoginFailures 定期清理过期的登录失败条目。
+// 与进程同生命周期，无需显式停止（进程退出即终止）。
+func (s *Server) cleanLoginFailures() {
+	ticker := time.NewTicker(10 * time.Minute)
+	defer ticker.Stop()
+	for range ticker.C {
+		cutoff := time.Now().Add(-loginFailGracePeriod)
+		s.loginFailures.Range(func(key, val interface{}) bool {
+			entry := val.(*loginFailEntry)
+			// 锁定已过期且超过宽限期未再失败 → 删除
+			if entry.lockoutUntil.Before(cutoff) {
+				s.loginFailures.Delete(key)
+			}
+			return true
+		})
 	}
 }
 
