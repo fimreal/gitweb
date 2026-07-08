@@ -481,12 +481,26 @@ body {
 .floating-tree-window.dragging { transition: none; box-shadow: var(--shadow-xl); }
 .floating-tree-window.morphing { transition: none; }
 /* FLIP 形变期间：标题栏/正文内容隐藏，让"边框缩小→图标"的视觉聚焦在形变本身；
-   min-dock 图标淡入而非立即出现，避免 SVG 与 scale 叠加放大的闪现。 */
+   min-dock 图标淡入而非立即出现，避免 SVG 与 scale 叠加放大的"大图标缩小"闪现。
+   JS 按方向加 morph-dir-minimize / morph-dir-restore，再用触发态 class 驱动图标：
+     · 收缩（minimize）：图标初始透明 → 接近收尾加 morphing-icon-in 才淡入（此时窗口
+       已接近浮岛尺寸，图标以正常大小出现，不再随大窗口 scale 被放大后缩小）。
+     · 还原（restore）：图标初始可见（小浮岛态本就显示）→ 开场 Play 加 morphing-icon-out
+       随窗口放大快速淡出，避免图标被 scale 放大又突然消失。 */
 .floating-tree-window.morphing .floating-tree-titlebar,
 .floating-tree-window.morphing .floating-tree-content { visibility: hidden; }
-.floating-tree-window.morphing .min-dock { visibility: visible; opacity: 0; transition: none; }
-/* Play 帧（JS 同步添加 morphing-icon-in）让图标在形变接近收尾时显形 */
-.floating-tree-window.morphing.morphing-icon-in .min-dock { opacity: 1; transition: opacity 0.12s ease; }
+/* 形变期间强制显示 min-dock（覆盖 .minimized 与非 .minimized 的 display 规则），
+   让图标能参与收缩淡入 / 还原淡出；不可见靠 opacity 控制，不靠 display 切换。 */
+.floating-tree-window.morphing .min-dock { display: flex !important; visibility: visible; transition: none; }
+/* 收缩：起点透明，接近收尾由 JS 加 morphing-icon-in 才淡入。
+   淡入时长 100ms，JS 在 DUR-120ms 时触发，确保淡入在 transform 结束前完成，
+   不会出现 transform 结束后 opacity 还没到 1 的跳变。 */
+.floating-tree-window.morphing.morph-dir-minimize .min-dock { opacity: 0; }
+.floating-tree-window.morphing.morph-dir-minimize.morphing-icon-in .min-dock { opacity: 1; transition: opacity 100ms ease; }
+/* 还原：起点可见（小浮岛态本就显示），Play 开场加 morphing-icon-out 后快速淡出。
+   用 ease-in 让前段就暗下去，减少图标被 scale 放大后再消失的突兀感。 */
+.floating-tree-window.morphing.morph-dir-restore .min-dock { opacity: 1; }
+.floating-tree-window.morphing.morph-dir-restore.morphing-icon-out .min-dock { opacity: 0; transition: opacity 80ms ease-in; }
 
 /* ---- 迷你浮岛态：逻辑尺寸固定 48，靠 transform 缩放，不 reflow ---- */
 .floating-tree-window.minimized {
