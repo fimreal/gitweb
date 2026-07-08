@@ -1351,7 +1351,11 @@
         // ---- FLIP 形变：把"宽高变化"合成成一次 transform 动画，不 reflow、不闪烁。
         // 记录 First(旧 rect) → 切到目标态读 Last(新 rect) → Invert(transform 把新态拉回旧视觉)
         // → Play(下一帧 transform 过渡到目标态的 transform)。
-        function flipMorph(applyTarget, done) {
+        // dir: 'minimize'（缩为浮岛）或 'restore'（从浮岛还原）。决定 min-dock 图标
+        // 的淡入/淡出时机——避免收缩时 SVG 跟着大窗口 scale 被放大成"大图标缩小"闪现。
+        function flipMorph(applyTarget, done, dir) {
+            // 重入保护：正在形变中直接忽略，防止快速连点导致动画叠加、监听累积
+            if (win.classList.contains('morphing')) return;
             const first = win.getBoundingClientRect();
             applyTarget();                       // 切 class / 设尺寸
             // 尊重 prefers-reduced-motion：直接到位，不做 FLIP 动画
@@ -1369,23 +1373,41 @@
             // 目标态自身的 transform（如吸附 scale）；FLIP 的位移/缩放叠加其上
             const targetTx = getComputedStyle(win).transform;
             const base = targetTx === 'none' ? '' : targetTx;
-            win.classList.add('morphing');
+            // 方向 class：minimize 起点透明、收尾淡入；restore 起点可见、开场淡出。
+            // restore 的淡出在 Play 帧才触发，Invert 期间仍以"可见"还原旧视觉。
+            const dirCls = dir === 'restore' ? 'morph-dir-restore' : 'morph-dir-minimize';
+            win.classList.add('morphing', dirCls);
             win.style.transition = 'none';
             // Invert：在新位置上用 transform 还原到旧视觉
             win.style.transform = base + ' translate(' + dx + 'px,' + dy + 'px) scale(' + sx + ',' + sy + ')';
             // 强制 commit Invert 态
             win.getBoundingClientRect();
+            const DUR = 340;
+            const FADE_IN_DELAY = DUR - 120; // 与 CSS 100ms 淡入配合：220ms 开始 → 320ms 结束（早于 340ms）
+            let finished = false;
+            let fadeTimer = null;
             // Play：下一帧切到目标 transform，带缓动
             requestAnimationFrame(() => {
-                win.style.transition = 'transform 0.34s ' + EASE;
+                win.style.transition = 'transform ' + DUR + 'ms ' + EASE;
                 win.style.transform = base;      // 回到目标态
-                // 让 min-dock 图标在收缩接近收尾时淡入（minimize），
-                // 或淡出回复展开（restore）：旋转方向靠是否已 minimized
-                win.classList.add('morphing-icon-in');
+                if (dir === 'restore') {
+                    // 还原：开场即淡出图标，避免它被 scale 放大后又突然消失
+                    win.classList.add('morphing-icon-out');
+                } else {
+                    // 收缩：延迟到形变接近收尾再淡入图标，窗口此时已接近浮岛尺寸，
+                    // 图标以"正常大小"出现，不会被 scale 放大成大图标再缩小。
+                    fadeTimer = setTimeout(() => {
+                        fadeTimer = null;
+                        if (win.classList.contains('morphing')) win.classList.add('morphing-icon-in');
+                    }, FADE_IN_DELAY);
+                }
             });
             const finish = () => {
-                win.classList.remove('morphing');
-                win.classList.remove('morphing-icon-in');
+                if (finished) return;          // 幂等：transitionend 与超时兜底都可能触发
+                finished = true;
+                if (fadeTimer) { clearTimeout(fadeTimer); fadeTimer = null; }
+                win.classList.remove('morphing', 'morph-dir-minimize', 'morph-dir-restore');
+                win.classList.remove('morphing-icon-in', 'morphing-icon-out');
                 win.style.transition = '';
                 win.style.transform = '';
                 if (done) done();
@@ -1395,8 +1417,8 @@
                 win.removeEventListener('transitionend', te);
                 finish();
             });
-            // 兜底：超时也结束
-            setTimeout(finish, 400);
+            // 兜底：超时也结束（略大于 DUR，保证收尾淡入能完成）
+            setTimeout(finish, DUR + 80);
         }
 
         // ---- 缩为迷你浮岛（带 FLIP） ----
@@ -1430,7 +1452,7 @@
                 win.style.transition = '';
                 win.style.animation = '';
             } else {
-                flipMorph(apply);
+                flipMorph(apply, null, 'minimize');
             }
         }
         function fromMiniIsland() {
@@ -1448,7 +1470,7 @@
                 } else {
                     win.style.left = ''; win.style.top = ''; win.style.right = '';
                 }
-            });
+            }, null, 'restore');
         }
 
         // ---- 停靠态（DevTools 风格：左 / 底 / 右） ----
