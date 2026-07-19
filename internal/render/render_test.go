@@ -87,3 +87,88 @@ func TestRenderPlainTextEscapes(t *testing.T) {
 		t.Errorf("plain text should wrap in pre/code, got %q", out)
 	}
 }
+
+func TestRenderCSV(t *testing.T) {
+	r := New()
+	in := []byte("name,age\nAlice,30\nBob,25\n")
+	out, err := r.Render("a.csv", in)
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	if !strings.Contains(out, "<table") {
+		t.Errorf("csv should render as table, got %q", out)
+	}
+	if !strings.Contains(out, "<th") || !strings.Contains(out, "name") {
+		t.Errorf("csv header missing, got %q", out)
+	}
+	if !strings.Contains(out, "Alice") || !strings.Contains(out, "30") {
+		t.Errorf("csv row data missing, got %q", out)
+	}
+	if strings.HasPrefix(out, "<pre><code>") {
+		t.Errorf("csv should not fall back to plain text, got %q", out)
+	}
+}
+
+func TestRenderCSVQuotedFields(t *testing.T) {
+	r := New()
+	// 含逗号、引号、换行的字段
+	in := []byte("id,note\n1,\"hello, world\"\n2,\"line1\nline2\"\n")
+	out, err := r.Render("a.csv", in)
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	if !strings.Contains(out, "<table") {
+		t.Errorf("quoted csv should render as table, got %q", out)
+	}
+	// 含换行的字段应被折叠为空格（markdown 单元格不支持多行）
+	if strings.Contains(out, "line1\nline2") {
+		t.Errorf("newline in cell should collapse to space, got %q", out)
+	}
+}
+
+func TestRenderCSVEscapedPipe(t *testing.T) {
+	r := New()
+	in := []byte("col\na|b\n")
+	out, err := r.Render("a.csv", in)
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	if !strings.Contains(out, "<table") {
+		t.Errorf("csv with pipe should render as table, got %q", out)
+	}
+	if !strings.Contains(out, "a|b") {
+		t.Errorf("pipe char should appear in cell, got %q", out)
+	}
+}
+
+func TestRenderTSV(t *testing.T) {
+	r := New()
+	in := []byte("name\tage\nAlice\t30\n")
+	out, err := r.Render("a.tsv", in)
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	if !strings.Contains(out, "<table") {
+		t.Errorf("tsv should render as table, got %q", out)
+	}
+	if !strings.Contains(out, "Alice") {
+		t.Errorf("tsv row data missing, got %q", out)
+	}
+}
+
+func TestRenderCSVMalformedFallsBackToText(t *testing.T) {
+	r := New()
+	// 非法 CSV：未闭合的引号字段
+	in := []byte("a,b\n\"unclosed\n")
+	out, err := r.Render("a.csv", in)
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	// 回退到纯文本：用 <pre><code> 包裹原内容
+	if !strings.HasPrefix(out, "<pre><code>") {
+		t.Errorf("malformed csv should fall back to plain text, got %q", out)
+	}
+	if !strings.Contains(out, "unclosed") {
+		t.Errorf("fallback should preserve original content, got %q", out)
+	}
+}

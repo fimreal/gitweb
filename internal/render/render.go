@@ -2,6 +2,7 @@ package render
 
 import (
 	"bytes"
+	"encoding/csv"
 	"path/filepath"
 	"strings"
 
@@ -117,6 +118,14 @@ func (r *Renderer) Kind(path string) Kind {
 // Render 把文件字节渲染为 HTML 片段（不含外层骨架，由前端注入容器）。
 // page 参数保留以便未来服务端分页，当前前端分页，始终渲染全文。
 func (r *Renderer) Render(path string, content []byte) (string, error) {
+	// CSV/TSV：转成 Markdown 表格语法后走 goldmark，输出 <table>。
+	// 解析失败时回退到纯文本，保证源码可读。
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".csv":
+		return r.renderCSV(content, false)
+	case ".tsv":
+		return r.renderCSV(content, true)
+	}
 	switch r.Kind(path) {
 	case KindHTML:
 		return string(content), nil
@@ -133,6 +142,46 @@ func (r *Renderer) renderMarkdown(content []byte) (string, error) {
 		return "", err
 	}
 	return buf.String(), nil
+}
+
+// renderCSV 把 CSV/TSV 转成 Markdown 表格语法，再走 goldmark 输出 <table>。
+// 解析失败（非法 CSV）或空内容时回退到纯文本展示，保证源码可读。
+func (r *Renderer) renderCSV(content []byte, tabSeparated bool) (string, error) {
+	reader := csv.NewReader(bytes.NewReader(content))
+	if tabSeparated {
+		reader.Comma = '\t'
+	}
+	reader.FieldsPerRecord = -1 // 允许行间列数不一致，按原始顺序展示
+	records, err := reader.ReadAll()
+	if err != nil || len(records) == 0 {
+		return r.renderPlainText(content), nil
+	}
+	var b strings.Builder
+	header := records[0]
+	sep := make([]string, len(header))
+	for i := range sep {
+		sep[i] = "---"
+	}
+	b.WriteString("| " + strings.Join(escapeMarkdownRow(header), " | ") + " |\n")
+	b.WriteString("| " + strings.Join(sep, " | ") + " |\n")
+	for _, row := range records[1:] {
+		b.WriteString("| " + strings.Join(escapeMarkdownRow(row), " | ") + " |\n")
+	}
+	return r.renderMarkdown([]byte(b.String()))
+}
+
+// escapeMarkdownRow 转义单元格内容以适配 Markdown 表格语法：
+// - "|" → "\|"（避免被当作列分隔符）
+// - 行内换行折叠为空格（Markdown 表格单元不支持多行）
+func escapeMarkdownRow(fields []string) []string {
+	out := make([]string, len(fields))
+	for i, f := range fields {
+		f = strings.ReplaceAll(f, "\r\n", " ")
+		f = strings.ReplaceAll(f, "\n", " ")
+		f = strings.ReplaceAll(f, "|", "\\|")
+		out[i] = f
+	}
+	return out
 }
 
 func (r *Renderer) renderPlainText(content []byte) string {
