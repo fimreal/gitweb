@@ -461,11 +461,16 @@ body {
     resize: both;
     min-width: 220px;
     min-height: 180px;
-    /* 只过渡合成器属性 + 圆角；width/height 不过渡（避免 reflow 卡顿） */
-    transition: box-shadow 0.28s var(--ease-apple), opacity 0.28s var(--ease-apple),
-                border-radius 0.28s var(--ease-apple), background 0.28s var(--ease-apple);
+    /* 过渡合成器属性 + 圆角 + 尺寸/位置：最小化/还原动画依赖 width/height/left/top
+       真实过渡，保证动画开始就是当前展开窗口的真实样子，缩小过程中尺寸/位置/圆角
+       平滑渐变到浮岛形态，不会有 FLIP scale 放大导致的"大框体闪过"或"对不上位置"。 */
+    transition: width 0.34s var(--ease-apple), height 0.34s var(--ease-apple),
+                left 0.34s var(--ease-apple), top 0.34s var(--ease-apple),
+                right 0.34s var(--ease-apple), bottom 0.34s var(--ease-apple),
+                box-shadow 0.28s var(--ease-apple), opacity 0.28s var(--ease-apple),
+                border-radius 0.34s var(--ease-apple), background 0.34s var(--ease-apple);
     transform: translateZ(0);
-    will-change: transform, opacity;
+    will-change: transform, opacity, width, height, left, top;
     animation: win-pop 0.32s var(--ease-apple);
 }
 @keyframes win-pop {
@@ -480,17 +485,11 @@ body {
 /* 拖动中：关过渡，保证跟手；FLIP 形变期间也临时关过渡（由 JS 用 transform 接管） */
 .floating-tree-window.dragging { transition: none; box-shadow: var(--shadow-xl); }
 .floating-tree-window.morphing {
-    transition: none;
-    /* 形变期间固定圆角并淡出窗口本体，避免 minimized 的 50% 圆角被 FLIP scale
-       放大成“大圆闪过”。图标用 fixed 定位脱离父元素 transform，始终以
-       最终 48px 大小显示，不参与窗口缩放。 */
-    border-radius: var(--r-lg) !important;
-    background: transparent !important;
-    border-color: transparent !important;
-    box-shadow: none !important;
-    -webkit-backdrop-filter: none !important;
-    backdrop-filter: none !important;
-    overflow: visible !important;
+    transition: width 0.34s var(--ease-apple), height 0.34s var(--ease-apple),
+                left 0.34s var(--ease-apple), top 0.34s var(--ease-apple),
+                right 0.34s var(--ease-apple), bottom 0.34s var(--ease-apple),
+                border-radius 0.34s var(--ease-apple), background 0.34s var(--ease-apple),
+                box-shadow 0.34s var(--ease-apple);
 }
 /* FLIP 形变期间：标题栏/正文内容隐藏，让"边框缩小→图标"的视觉聚焦在形变本身；
    min-dock 图标淡入而非立即出现，避免 SVG 与 scale 叠加放大的"大图标缩小"闪现。
@@ -500,31 +499,17 @@ body {
      · 还原（restore）：图标初始可见（小浮岛态本就显示）→ 开场 Play 加 morphing-icon-out
        随窗口放大快速淡出，避免图标被 scale 放大又突然消失。 */
 .floating-tree-window.morphing .floating-tree-titlebar,
-.floating-tree-window.morphing .floating-tree-content { visibility: hidden; }
-/* 形变期间强制显示 min-dock（覆盖 .minimized 与非 .minimized 的 display 规则）。
-   图标 fixed 定位脱离父元素 transform/scale，始终以最终 48px 大小显示在
-   JS 设定的 --morph-icon-x/--morph-icon-y 位置，避免“大图标缩小”闪现。
-   收缩时直接可见；还原时从旧位置淡出，窗口从新位置淡入。 */
-.floating-tree-window.morphing .min-dock {
-    position: fixed !important;
-    display: flex !important;
-    visibility: visible !important;
-    width: 48px !important;
-    height: 48px !important;
-    left: var(--morph-icon-x, 50%) !important;
-    top: var(--morph-icon-y, 50%) !important;
-    margin: 0 !important;
-    opacity: 1 !important;
-    transform: none !important;
-    transition: opacity 180ms ease !important;
-    z-index: 1002;
+.floating-tree-window.morphing .floating-tree-content {
+    transition: opacity 0.22s var(--ease-apple);
+    opacity: 0;
 }
-/* 收缩：图标在目标位置直接可见，窗口本体淡出缩小；无需延迟淡入。 */
-.floating-tree-window.morphing.morph-dir-minimize .min-dock { opacity: 1; }
-/* 还原：图标在旧浮岛位置保持可见，窗口淡入展开；接近收尾时图标淡出，
-   避免窗口完全展开后图标突然消失。 */
-.floating-tree-window.morphing.morph-dir-restore .min-dock { opacity: 1; }
-.floating-tree-window.morphing.morph-dir-restore.morphing-icon-out .min-dock { opacity: 0; transition: opacity 120ms ease-in; }
+.floating-tree-window.morphing .min-dock {
+    display: flex !important;
+    visibility: visible;
+    opacity: 0;
+    transition: opacity 0.16s ease 0.18s;
+}
+.floating-tree-window.morphing.morph-icon-in .min-dock { opacity: 1; }
 
 /* ---- 迷你浮岛态：逻辑尺寸固定 48，靠 transform 缩放，不 reflow ---- */
 .floating-tree-window.minimized {
