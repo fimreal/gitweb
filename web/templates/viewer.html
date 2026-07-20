@@ -1348,34 +1348,75 @@
             ro.observe(win);
         }
 
+        // ---- 真实尺寸/位置过渡动画（替代 FLIP scale 方案）----
+        // 让窗口从当前展开尺寸/位置"真实地"缩小到 48×48 浮岛（或反向还原），
+        // 由 CSS transition 驱动 width/height/left/top/border-radius/background，
+        // 不用 transform scale 反向放大，避免 Invert 阶段出现"大框体"闪过。
+        // apply: 切到目标态（设 minimized class 或展开尺寸/位置）；dir: minimize/restore。
+        function morphTo(apply, dir) {
+            if (win.classList.contains('morphing')) return;
+            const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+            if (reduceMotion) { apply(); return; }
+            // 记录当前展开态位置/尺寸，作为 transition 的起点（确保 inline style 有值）
+            if (dir === 'minimize') {
+                const r = win.getBoundingClientRect();
+                if (pos.winLeft == null) { pos.winLeft = r.left; pos.winTop = r.top; savePos({ winLeft: r.left, winTop: r.top }); }
+                if (pos.winWidth == null) { pos.winWidth = r.width; pos.winHeight = r.height; savePos({ winWidth: r.width, winHeight: r.height }); }
+                win.style.width = r.width + 'px';
+                win.style.height = r.height + 'px';
+                win.style.left = r.left + 'px';
+                win.style.top = r.top + 'px';
+                win.style.right = 'auto';
+                win.style.bottom = 'auto';
+            }
+            // 加 morphing class 启用尺寸/位置/圆角/背景 transition
+            win.classList.add('morphing');
+            // 强制 commit 起点样式，下一帧再 apply 切到目标态，触发 transition
+            win.getBoundingClientRect();
+            requestAnimationFrame(() => {
+                apply();
+                // minimize 时 apply 加了 minimized class（CSS width/height=48），但 inline
+                // width/height 仍是展开尺寸会覆盖 class——必须清掉 inline，让 48×48 生效，
+                // width/height 才会从展开尺寸过渡到 48。left/top 由 applyDockPos 设了 inline。
+                if (dir === 'minimize') {
+                    win.style.width = '';
+                    win.style.height = '';
+                    // 接近收尾时让图标淡入
+                    setTimeout(() => {
+                        if (win.classList.contains('morphing')) win.classList.add('morph-icon-in');
+                    }, 180);
+                }
+            });
+            const DUR = 340;
+            let finished = false;
+            const finish = () => {
+                if (finished) return;
+                finished = true;
+                win.classList.remove('morphing', 'morph-icon-in');
+                if (dir === 'restore') {
+                    // 还原后保存位置/尺寸
+                    savePos({ winLeft: parseFloat(win.style.left), winTop: parseFloat(win.style.top),
+                              winWidth: parseFloat(win.style.width), winHeight: parseFloat(win.style.height) });
+                }
+            };
+            // transitionend 监听 width（最长稳定属性）
+            win.addEventListener('transitionend', function te(e) {
+                if (e.propertyName !== 'width' && e.propertyName !== 'left') return;
+                win.removeEventListener('transitionend', te);
+                finish();
+            });
+            setTimeout(finish, DUR + 100);
+        }
+
         // ---- FLIP 形变：把"宽高变化"合成成一次 transform 动画，不 reflow、不闪烁。
         // 记录 First(旧 rect) → 切到目标态读 Last(新 rect) → Invert(transform 把新态拉回旧视觉)
         // → Play(下一帧 transform 过渡到目标态的 transform)。
-        // dir: 'minimize'（缩为浮岛）或 'restore'（从浮岛还原）。
-        // 为了避免"大圆形/大图标闪过"：
-        //   · morphing 期间窗口本体透明（CSS 控制），只让图标可见。
-        //   · min-dock 图标 fixed 定位在 JS 计算的位置，不参与父元素 scale，
-        //     始终以最终 48px 大小显示。
-        //   · 窗口本身做 opacity crossfade：minimize 淡出，restore 淡入。
-        function setMorphIconPos(x, y) {
-            win.style.setProperty('--morph-icon-x', x + 'px');
-            win.style.setProperty('--morph-icon-y', y + 'px');
-        }
+        // dir: 'minimize'（缩为浮岛）或 'restore'（从浮岛还原）。决定 min-dock 图标
+        // 的淡入/淡出时机——避免收缩时 SVG 跟着大窗口 scale 被放大成"大图标缩小"闪现。
         function flipMorph(applyTarget, done, dir) {
             // 重入保护：正在形变中直接忽略，防止快速连点导致动画叠加、监听累积
             if (win.classList.contains('morphing')) return;
-            const ICON_SIZE = 48;
             const first = win.getBoundingClientRect();
-            // 图标固定位置：minimize 时已经在目标浮岛位置；restore 时图标仍停在旧浮岛中心。
-            let iconX, iconY;
-            if (dir === 'minimize') {
-                iconX = (pos.dockLeft != null ? pos.dockLeft : window.innerWidth - 56);
-                iconY = (pos.dockTop != null ? pos.dockTop : window.innerHeight - 56);
-            } else {
-                iconX = first.left + first.width / 2 - ICON_SIZE / 2;
-                iconY = first.top + first.height / 2 - ICON_SIZE / 2;
-            }
-            setMorphIconPos(iconX, iconY);
             applyTarget();                       // 切 class / 设尺寸
             // 尊重 prefers-reduced-motion：直接到位，不做 FLIP 动画
             const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -1389,40 +1430,46 @@
             if (!isFinite(sx) || !isFinite(sy) || (sx === 1 && sy === 1 && dx === 0 && dy === 0)) {
                 if (done) done(); return;
             }
-            // 方向 class：minimize 窗口淡出、图标可见；restore 窗口淡入、图标淡出。
+            // 目标态自身的 transform（如吸附 scale）；FLIP 的位移/缩放叠加其上
+            const targetTx = getComputedStyle(win).transform;
+            const base = targetTx === 'none' ? '' : targetTx;
+            // 方向 class：minimize 起点透明、收尾淡入；restore 起点可见、开场淡出。
+            // restore 的淡出在 Play 帧才触发，Invert 期间仍以"可见"还原旧视觉。
             const dirCls = dir === 'restore' ? 'morph-dir-restore' : 'morph-dir-minimize';
             win.classList.add('morphing', dirCls);
             win.style.transition = 'none';
             // Invert：在新位置上用 transform 还原到旧视觉
-            win.style.transform = 'translate(' + dx + 'px,' + dy + 'px) scale(' + sx + ',' + sy + ')';
+            win.style.transform = base + ' translate(' + dx + 'px,' + dy + 'px) scale(' + sx + ',' + sy + ')';
             // 强制 commit Invert 态
             win.getBoundingClientRect();
             const DUR = 340;
+            const FADE_IN_DELAY = DUR - 120; // 与 CSS 100ms 淡入配合：220ms 开始 → 320ms 结束（早于 340ms）
             let finished = false;
-            // Play：下一帧切到目标 transform，并同时做窗口 opacity crossfade
+            let fadeTimer = null;
+            // Play：下一帧切到目标 transform，带缓动
             requestAnimationFrame(() => {
-                win.style.transition = 'transform ' + DUR + 'ms ' + EASE + ', opacity ' + DUR + 'ms ' + EASE;
-                win.style.transform = 'none';      // 回到目标态
-                if (dir === 'minimize') {
-                    win.style.opacity = '0';       // 窗口淡出，图标已在目标位置可见
+                win.style.transition = 'transform ' + DUR + 'ms ' + EASE;
+                win.style.transform = base;      // 回到目标态
+                if (dir === 'restore') {
+                    // 还原：开场即淡出图标，避免它被 scale 放大后又突然消失
+                    win.classList.add('morphing-icon-out');
                 } else {
-                    win.style.opacity = '1';       // 窗口淡入
-                    // 还原：接近收尾时淡出旧图标，避免窗口完全展开后图标突然消失
-                    setTimeout(() => {
-                        if (win.classList.contains('morphing')) win.classList.add('morphing-icon-out');
-                    }, DUR - 120);
+                    // 收缩：延迟到形变接近收尾再淡入图标，窗口此时已接近浮岛尺寸，
+                    // 图标以"正常大小"出现，不会被 scale 放大成大图标再缩小。
+                    fadeTimer = setTimeout(() => {
+                        fadeTimer = null;
+                        if (win.classList.contains('morphing')) win.classList.add('morphing-icon-in');
+                    }, FADE_IN_DELAY);
                 }
             });
             const finish = () => {
                 if (finished) return;          // 幂等：transitionend 与超时兜底都可能触发
                 finished = true;
+                if (fadeTimer) { clearTimeout(fadeTimer); fadeTimer = null; }
                 win.classList.remove('morphing', 'morph-dir-minimize', 'morph-dir-restore');
                 win.classList.remove('morphing-icon-in', 'morphing-icon-out');
                 win.style.transition = '';
                 win.style.transform = '';
-                win.style.opacity = '';
-                win.style.removeProperty('--morph-icon-x');
-                win.style.removeProperty('--morph-icon-y');
                 if (done) done();
             };
             win.addEventListener('transitionend', function te(e) {
@@ -1430,7 +1477,7 @@
                 win.removeEventListener('transitionend', te);
                 finish();
             });
-            // 兜底：超时也结束
+            // 兜底：超时也结束（略大于 DUR，保证收尾淡入能完成）
             setTimeout(finish, DUR + 80);
         }
 
@@ -1457,7 +1504,7 @@
                 win.classList.add('minimized');
             };
             if (skipAnim) {
-                // 启动时直接切迷你态，不做 FLIP（避免与 win-pop 入场动画的 transform 冲突）
+                // 启动时直接切迷你态，不做动画（避免与 win-pop 入场动画的 transform 冲突）
                 win.style.transition = 'none';
                 win.style.animation = 'none';
                 apply();
@@ -1465,11 +1512,14 @@
                 win.style.transition = '';
                 win.style.animation = '';
             } else {
-                flipMorph(apply, null, 'minimize');
+                // 真实尺寸/位置过渡：先用 morphing class 启用 width/height/left/top/border-radius/
+                // background 的 CSS transition，下一帧再切到 minimized 目标态，让窗口"真实地"
+                // 从展开尺寸缩小到 48×48 浮岛，不会出现 FLIP scale 反向放大导致的大框体闪过。
+                morphTo(apply, 'minimize');
             }
         }
         function fromMiniIsland() {
-            // 先计算展开态目标尺寸与位置，避免在 minimized 态下读取 offsetWidth（此时只有 48px）。
+            // 先计算展开态目标尺寸与位置，避免在 minimized 48×48 状态下读取 offsetWidth 错误
             const vw = window.innerWidth, vh = window.innerHeight;
             const targetW = Math.min(pos.winWidth || 320, Math.max(220, vw * 0.9));
             const targetH = Math.min(pos.winHeight || 520, Math.max(180, vh * 0.72));
@@ -1479,11 +1529,10 @@
                 && targetX >= -targetW * 0.5 && targetX <= vw - targetW * 0.5
                 && targetY != null && targetY >= 0 && targetY <= vh - 40;
             if (!inView) {
-                // 默认放到右上角（与 CSS top:80 right:24 对应），确保不会偏到左上角
                 targetX = Math.max(24, vw - targetW - 24);
                 targetY = 80;
             }
-            flipMorph(() => {
+            const apply = () => {
                 win.classList.remove('minimized', 'snapped', 'snap-left', 'snap-right', 'snap-top', 'snap-bottom');
                 win.style.width = targetW + 'px';
                 win.style.height = targetH + 'px';
@@ -1491,7 +1540,8 @@
                 win.style.top = targetY + 'px';
                 win.style.right = 'auto';
                 win.style.bottom = 'auto';
-            }, null, 'restore');
+            };
+            morphTo(apply, 'restore');
         }
 
         // ---- 停靠态（DevTools 风格：左 / 底 / 右） ----
