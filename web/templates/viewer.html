@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>{{ .RepoName }} - gitweb</title>
     <link rel="stylesheet" href="/static/css/viewer.css">
     <link rel="stylesheet" href="/static/css/toast.css">
@@ -1045,12 +1045,60 @@
         });
     }
 
+    // ---------- 加载进度条 ----------
+    function showLoadingProgress(area, label) {
+        area.innerHTML = '<div class="loading-progress"><div>' + label + '</div>'
+            + '<div class="progress-bar indeterminate"><div class="progress-fill"></div></div>'
+            + '<div class="progress-text"></div></div>';
+        return area.querySelector('.loading-progress');
+    }
+    function updateProgress(container, received, total) {
+        if (!container) return;
+        const bar = container.querySelector('.progress-bar');
+        const fill = container.querySelector('.progress-fill');
+        const text = container.querySelector('.progress-text');
+        if (total > 0) {
+            bar.classList.remove('indeterminate');
+            const pct = Math.min(Math.round(received / total * 100), 100);
+            fill.style.width = pct + '%';
+            text.textContent = formatBytes(received) + ' / ' + formatBytes(total) + ' (' + pct + '%)';
+        } else {
+            text.textContent = formatBytes(received);
+        }
+    }
+    function formatBytes(n) {
+        if (n < 1024) return n + ' B';
+        if (n < 1048576) return (n / 1024).toFixed(1) + ' KB';
+        return (n / 1048576).toFixed(2) + ' MB';
+    }
+    async function readWithProgress(resp, progressContainer) {
+        const total = parseInt(resp.headers.get('content-length') || '0', 10);
+        if (!resp.body || !total) {
+            const text = await resp.text();
+            if (progressContainer) updateProgress(progressContainer, text.length, text.length);
+            return text;
+        }
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let received = 0;
+        let result = '';
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            received += value.length;
+            result += decoder.decode(value, { stream: true });
+            updateProgress(progressContainer, received, total);
+        }
+        result += decoder.decode();
+        return result;
+    }
+
     // ---------- 文件加载 ----------
     // 以源码模式加载文件（raw=1 拿原始字节，pre/code 展示）。供「显示源代码」按钮和
     // 源码模式下切换文件复用。图片无源码概念，调用方应自行跳过。
     async function loadFileSource(path) {
         const area = document.getElementById('content-area');
-        area.innerHTML = '<div class="welcome">' + (currentLang === 'zh' ? '加载源码...' : 'Loading source...') + '</div>';
+        const progress = showLoadingProgress(area, currentLang === 'zh' ? '加载源码...' : 'Loading source...');
         try {
             const resp = await authFetch('/' + pathID + '/' + encodeURI(path) + refQuery() + '&raw=1');
             if (!resp.ok) {
@@ -1059,7 +1107,7 @@
                 toast.error(msg);
                 return;
             }
-            const text = await resp.text();
+            const text = await readWithProgress(resp, progress);
             renderTextWithPagination(area, path, '<pre><code>' + escapeHtml(text) + '</code></pre>');
         } catch (err) {
             const msg = currentLang === 'zh' ? '加载失败: ' + err.message : 'Failed: ' + err.message;
@@ -1091,6 +1139,7 @@
                 return;
             }
             // md/txt/代码：后端返回 HTML 片段，前端注入。长内容前端分页。
+            const progress = showLoadingProgress(area, currentLang === 'zh' ? '加载中...' : 'Loading...');
             const resp = await authFetch('/' + pathID + '/' + encodeURI(path) + refQuery());
             if (!resp.ok) {
                 const msg = httpErrorMsg(resp, '加载失败（' + resp.status + '）', 'Failed to load (' + resp.status + ')');
@@ -1098,7 +1147,7 @@
                 toast.error(msg);
                 return;
             }
-            const html = await resp.text();
+            const html = await readWithProgress(resp, progress);
             renderTextWithPagination(area, path, html);
         } catch (err) {
             const msg = currentLang === 'zh' ? '加载失败: ' + err.message : 'Failed to load: ' + err.message;
@@ -1109,7 +1158,7 @@
 
     function renderHTMLInIframe(path) {
         const area = document.getElementById('content-area');
-        area.innerHTML = '<div class="welcome">' + (currentLang === 'zh' ? '加载中...' : 'Loading...') + '</div>';
+        const progress = showLoadingProgress(area, currentLang === 'zh' ? '加载中...' : 'Loading...');
 
         const fileURL = '/' + pathID + '/' + encodeURI(path) + refQuery();
         const openText = currentLang === 'zh' ? '在新标签页打开' : 'Open in new tab';
@@ -1122,7 +1171,7 @@
                 toast.error(msg);
                 return;
             }
-            const html = await resp.text();
+            const html = await readWithProgress(resp, progress);
 
             const notice = document.createElement('div');
             notice.className = 'html-notice';
@@ -1223,6 +1272,10 @@
         localStorage.setItem(POS_KEY, JSON.stringify(Object.assign(cur, patch)));
     }
 
+    function vvH() {
+        return (window.visualViewport && window.visualViewport.height) || window.innerHeight;
+    }
+
     // 通用拖动：在 handle(s) 上按下时移动 el。handle 可为元素或数组。
     // onMove 可选，用于实时存储位置 / 边缘吸附反馈；阈值过滤纯点击（移动小于 4px 视为点击）。
     // opts.allowOverflow: 允许拖出视口（用于贴边半隐入）。onMove 收到 (x,y,edge)，edge 为最近边
@@ -1251,10 +1304,10 @@
             if (opts.allowOverflow) {
                 // 允许部分超出视口（贴边半隐入），但仍保留至少一部分可见
                 x = Math.max(-w + 16, Math.min(x, window.innerWidth - 16));
-                y = Math.max(-h + 16, Math.min(y, window.innerHeight - 16));
+                y = Math.max(-h + 16, Math.min(y, vvH() - 16));
             } else {
                 x = Math.max(0, Math.min(x, window.innerWidth - w));
-                y = Math.max(0, Math.min(y, window.innerHeight - h));
+                y = Math.max(0, Math.min(y, vvH() - h));
             }
             el.style.left = x + 'px';
             el.style.top = y + 'px';
@@ -1262,7 +1315,7 @@
             // 计算元素边缘到视口边缘的距离（允许负数=超出）
             const edges = {
                 left: x, right: window.innerWidth - (x + w),
-                top: y, bottom: window.innerHeight - (y + h)
+                top: y, bottom: vvH() - (y + h)
             };
             let edge = 'left', dist = edges.left;
             for (const k in edges) { if (edges[k] < dist) { dist = edges[k]; edge = k; } }
@@ -1487,15 +1540,15 @@
             if (win.classList.contains('docked')) undock();
             // 首次最小化：把浮岛放到右下角附近（若没有保存位置）
             if (pos.dockLeft == null) {
-                const x = window.innerWidth - 56, y = window.innerHeight - 56;
+                const x = window.innerWidth - 56, y = vvH() - 56;
                 pos.dockLeft = x; pos.dockTop = y; pos.dockSnap = null;
             } else {
                 // 已有保存位置：检查是否还在当前视口内（横竖屏切换后可能越界）
                 const w = 56, h = 56;
-                if (pos.dockLeft > window.innerWidth - w || pos.dockTop > window.innerHeight - h ||
+                if (pos.dockLeft > window.innerWidth - w || pos.dockTop > vvH() - h ||
                     pos.dockLeft < 0 || pos.dockTop < 0) {
                     pos.dockLeft = window.innerWidth - 56;
-                    pos.dockTop = window.innerHeight - 56;
+                    pos.dockTop = vvH() - 56;
                     pos.dockSnap = null;
                 }
             }
@@ -1520,7 +1573,7 @@
         }
         function fromMiniIsland() {
             // 先计算展开态目标尺寸与位置，避免在 minimized 48×48 状态下读取 offsetWidth 错误
-            const vw = window.innerWidth, vh = window.innerHeight;
+            const vw = window.innerWidth, vh = vvH();
             const targetW = Math.min(pos.winWidth || 320, Math.max(220, vw * 0.9));
             const targetH = Math.min(pos.winHeight || 520, Math.max(180, vh * 0.72));
             let targetX = pos.winLeft;
@@ -1634,7 +1687,7 @@
                 applyContentInset(side);
             } else if (resizeSide === 'ns') {
                 const delta = resizeStart - e.clientY; // 底停靠：上边线往上拖=变高
-                const h = Math.max(120, Math.min(resizeStartSize + delta, window.innerHeight * 0.7));
+                const h = Math.max(120, Math.min(resizeStartSize + delta, vvH() * 0.7));
                 win.style.setProperty('--dock-h', h + 'px');
                 applyContentInset(side);
             }
@@ -1659,6 +1712,16 @@
             document.dispatchEvent(new MouseEvent('mousemove', { clientX: t.clientX, clientY: t.clientY }));
             e.preventDefault();
         }, { passive: false });
+        // 触屏结束必须重置 resizing，否则 iOS Safari 上手指抬起后 sliding 页面时
+        // touchmove 仍命中 resizing 分支被 preventDefault 拦截，页面滚不动、还在调高度。
+        document.addEventListener('touchend', () => {
+            if (!resizing) return;
+            resizing = false;
+            const side = pos.dockSide;
+            if (side === 'left' || side === 'right') savePos({ dockW: win.offsetWidth });
+            else if (side === 'bottom') savePos({ dockH: win.offsetHeight });
+        });
+        document.addEventListener('touchcancel', () => { resizing = false; });
 
         // 恢复保存的停靠尺寸
         function restoreDockSize() {
@@ -1813,10 +1876,10 @@
             if (!win.classList.contains('minimized')) return;
             if (pos.dockLeft == null) return;
             const w = 56, h = 56;
-            if (pos.dockLeft > window.innerWidth - w || pos.dockTop > window.innerHeight - h ||
+            if (pos.dockLeft > window.innerWidth - w || pos.dockTop > vvH() - h ||
                 pos.dockLeft < 0 || pos.dockTop < 0) {
                 pos.dockLeft = window.innerWidth - 56;
-                pos.dockTop = window.innerHeight - 56;
+                pos.dockTop = vvH() - 56;
                 pos.dockSnap = null;
                 applyDockPos(pos.dockLeft, pos.dockTop, pos.dockSnap);
                 savePos({ dockLeft: pos.dockLeft, dockTop: pos.dockTop, dockSnap: null });
@@ -1824,6 +1887,11 @@
         }
         window.addEventListener('orientationchange', () => setTimeout(onOrientForMinimized, 200));
         window.addEventListener('resize', onOrientForMinimized);
+        // 移动 Chrome 地址栏显隐会改变可见视口高度（innerHeight 不变），
+        // 监听 visualViewport.resize 把浮岛重新钳制回可见区，避免被地址栏挡住。
+        if (window.visualViewport) {
+            window.visualViewport.addEventListener('resize', onOrientForMinimized);
+        }
         if (treeContent) {
             // 统一用 click 事件做双击检测：iOS Safari 的 click 可靠触发，
             // dblclick 在移动端不可靠。记录上次 click 的目标 + 时间 + 位置，
@@ -1898,7 +1966,7 @@
                     if (snapped === 'left') fx = -s / 2;
                     if (snapped === 'right') fx = window.innerWidth - s / 2;
                     if (snapped === 'top') fy = -s / 2;
-                    if (snapped === 'bottom') fy = window.innerHeight - s / 2;
+                    if (snapped === 'bottom') fy = vvH() - s / 2;
                 }
                 // 松手滑入：给 left/top 一段短缓动，让"靠边→压边"是滑过去而非瞬移
                 const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;

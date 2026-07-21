@@ -86,6 +86,7 @@ body {
     color: var(--fg);
     line-height: 1.6;
     height: 100vh;
+    height: 100dvh;
     overflow: hidden;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
@@ -96,6 +97,7 @@ body {
     position: relative;
     width: 100%;
     height: 100vh;
+    height: 100dvh;
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -413,12 +415,48 @@ body {
     padding: 24px;
     /* 顶部留出标题栏高度（标题栏悬浮在上方），内容不被遮挡 */
     padding-top: calc(var(--header-h, 56px) + 16px);
+    padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+    -webkit-overflow-scrolling: touch;
 }
 
 .welcome {
     text-align: center;
     padding: 80px 20px;
     color: var(--secondary);
+}
+
+.loading-progress {
+    text-align: center;
+    padding: 80px 20px;
+    color: var(--secondary);
+}
+.loading-progress .progress-bar {
+    width: 200px;
+    max-width: 80%;
+    height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    margin: 16px auto 0;
+    overflow: hidden;
+}
+.loading-progress .progress-bar .progress-fill {
+    height: 100%;
+    width: 0%;
+    background: var(--accent);
+    border-radius: 2px;
+    transition: width 0.2s ease;
+}
+.loading-progress .progress-bar.indeterminate .progress-fill {
+    width: 30%;
+    animation: progress-slide 1.2s ease-in-out infinite;
+}
+@keyframes progress-slide {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(400%); }
+}
+.loading-progress .progress-text {
+    font-size: 13px;
+    margin-top: 8px;
 }
 
 .error {
@@ -448,6 +486,7 @@ body {
     max-width: 90vw;
     height: 520px;
     max-height: 72vh;
+    max-height: 72dvh;
     background: var(--glass-bg);
     -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(160%);
     backdrop-filter: blur(var(--glass-blur)) saturate(160%);
@@ -779,20 +818,26 @@ body {
 }
 .floating-tree-window.docked .floating-tree-titlebar h3 { font-size: 13px; }
 
-/* 左停靠：贴左缘，从 header 下方到底部全高，右侧可拖拽调宽 */
+/* 左停靠：贴左缘，从 header 下方到底部全高，右侧可拖拽调宽。
+   用 height 而非 top+bottom 双定位：iOS Safari 在地址栏收缩/展开时
+   top+bottom 同时设值的 fixed 元素会高度跳动、滚动时位置错乱。 */
 .floating-tree-window.docked-left {
-    top: var(--header-h, 52px) !important; bottom: 0 !important; left: 0 !important; right: auto !important;
+    top: var(--header-h, 52px) !important; bottom: auto !important; left: 0 !important; right: auto !important;
     width: var(--dock-w, 300px); max-width: 60vw; min-width: 180px;
-    height: auto !important; max-height: none;
+    height: calc(100vh - var(--header-h, 52px)) !important;
+    height: calc(100dvh - var(--header-h, 52px)) !important;
+    max-height: none;
     border-radius: 0;
     border-left: none;
     border-right: 1px solid var(--border);
 }
 /* 右停靠：贴右缘，从 header 下方到底部全高，左侧可拖拽调宽 */
 .floating-tree-window.docked-right {
-    top: var(--header-h, 52px) !important; bottom: 0 !important; right: 0 !important; left: auto !important;
+    top: var(--header-h, 52px) !important; bottom: auto !important; right: 0 !important; left: auto !important;
     width: var(--dock-w, 300px); max-width: 60vw; min-width: 180px;
-    height: auto !important; max-height: none;
+    height: calc(100vh - var(--header-h, 52px)) !important;
+    height: calc(100dvh - var(--header-h, 52px)) !important;
+    max-height: none;
     border-radius: 0;
     border-right: none;
     border-left: 1px solid var(--border);
@@ -801,7 +846,7 @@ body {
 .floating-tree-window.docked-bottom {
     left: 0 !important; right: 0 !important; bottom: 0 !important; top: auto !important;
     width: auto !important; max-width: none;
-    height: var(--dock-h, 320px); max-height: 70vh; min-height: 120px;
+    height: var(--dock-h, 320px); max-height: 70vh; max-height: 70dvh; min-height: 120px;
     border-radius: 0;
     border-bottom: none;
     border-top: 1px solid var(--border);
@@ -1017,6 +1062,7 @@ body {
 /* 分页 */
 .pagination {
     padding: 12px 16px;
+    padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
     border-top: 1px solid var(--border);
     background: var(--panel-bg);
     display: flex;
@@ -1054,6 +1100,7 @@ body {
 .html-frame {
     width: 100%;
     height: calc(100vh - 220px);
+    height: calc(100dvh - 220px);
     border: 1px solid var(--border);
     border-radius: var(--r-md);
     background: white;

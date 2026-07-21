@@ -60,7 +60,7 @@ func main() {
 				MaxFileSize: 5 * 1024 * 1024,
 			},
 			Fetch: config.FetchConfig{
-				Timeout: 10 * time.Second,
+				Timeout: 30 * time.Second,
 			},
 		}
 	}
