@@ -78,7 +78,7 @@ func setDefaults(cfg *Config) {
 		cfg.Cache.MaxFileSize = 5 * 1024 * 1024
 	}
 	if cfg.Fetch.Timeout == 0 {
-		cfg.Fetch.Timeout = 10 * time.Second
+		cfg.Fetch.Timeout = 30 * time.Second
 	}
 	if cfg.Fetch.RateLimit == 0 {
 		cfg.Fetch.RateLimit = 100 // 默认 100 req/min per host

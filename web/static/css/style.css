@@ -81,6 +81,7 @@ body {
     line-height: 1.6;
     transition: background 0.3s var(--ease-apple), color 0.3s var(--ease-apple);
     min-height: 100vh;
+    min-height: 100dvh;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
@@ -89,6 +90,7 @@ body {
 /* ---------- 背景光晕：柔和渐变光斑，给页面纵深 ---------- */
 .hero {
     min-height: 100vh;
+    min-height: 100dvh;
     display: flex;
     align-items: center;
     justify-content: center;

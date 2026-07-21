@@ -13,7 +13,7 @@ cache:
   max_file_size: 5242880  # 5MB in bytes
 
 fetch:
-  timeout: 10s
+  timeout: 30s
   http_proxy: ""   # e.g., http://10.0.0.1:7890
   https_proxy: ""  # e.g., http://10.0.0.1:7890
   # SSRF: allow/deny wildcards (*.gitea.*). Private/loopback/link-local IPs
