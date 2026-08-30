@@ -54,18 +54,23 @@
 - 中性色阶统一到 slate（首页 `--fg:#0f172a` 即 slate-900；viewer 的 `#1a1a1a` 属 neutral —— 保留首页观感，改 viewer）
 - 补齐缺失 token，上表那 4 处死引用自动痊愈
 - 圆角收敛为一组紧凑刻度
-- UI 基准字号 14；`viewer.css` 约 30 处硬编码 `px` 字号（跨度 10.5–18px）必须一并收进比例刻度，否则 14 只对首页生效
+- UI 基准字号 14；`viewer.css` 32 处 + `toast.css` 2 处 + `style.css` 3 处 + `login.html` 5 处硬编码 `px` 字号全部改为 rem（1rem = 14px）。**没有**另立 `--fs-*` 刻度：`style.css` 本来就直接写 rem，再插一层变量只会让同一件事有两种写法。另在 `tokens.css` 补一条控件基线（`button/input/select/textarea` 继承 family 与 size），否则浏览器 UA 样式把控件钉在 13.333px Arial，基准 14 对按钮和输入框根本不生效。新增 `TestNoAbsoluteFontSizes` 守住这条。
 - 字体栈合并为 1 sans + 1 mono，**显式补 `PingFang SC` / `Microsoft YaHei`**（现在两套都不含中文栈，中文实际一直在吃浏览器 fallback）
-- 暗色改为**边框主导**：暗色下 `--shadow-*` 设极弱值，靠 `1px solid var(--border)` 分界
+- 暗色改为**边框主导**：分界靠 `1px solid var(--border)` / `--border-strong`，不靠投影。暗色投影因此压成单层纯黑、alpha 反而比浅色高（`--shadow-sm` 0.28 起）——黑色阴影落在深底上本来就弱，写成「极弱值」等于直接消失。
 - 主按钮在暗色下是 `--accent → --accent-hover(#60a5fa)` 的渐变，白字压在渐变亮端只有 **2.54:1**（AA 要 4.5:1）；改为 `#2563eb` 配白字实测 **5.17:1**
 - 删除 `--glass-*` 与全部 `backdrop-filter`
 - 三套暗色机制收敛为一套：只留 `[data-theme="dark"]`，删掉 `@media (prefers-color-scheme: dark)` 的 token 块与 18 处双写
 
-模板侧新建 `web/templates/partials/`：`head.html`（参数化 title + 资源清单）、`icons.html`（45 个内联 SVG → 一个 sprite）、`controls.html`（三份复制的主题/语言按钮）、`modal.html`。`main.go` 的解析 pattern 增加一个目录。
+模板侧新建 `web/templates/partials/`，本阶段只抽两处真正重复的东西：
 
-顺带修的 4 个既有缺陷：`index.html:5` / `login.html:5` / `error.html:5` 缺 `viewport-fit=cover`；`error.html` 加载 `app.js` 却不加载 `toast.js`；§4 的 `--panel-bg` 死引用；`embed.html:8-16` 自带一段内联 `<style>`，与三个 css 文件并成第 4 个样式真源。
+- `head.html`：charset + `viewport-fit=cover` + `tokens.css` + `theme.js`。**title 与各页自己的 css/js 清单刻意留在页面里**——模板名取自文件名，`templates/` 与 `templates/partials/` 重名不报错只会静默覆盖（这条由 `web/embed_test.go` 守住），所以不做整页继承；把资源清单收进公共片段还会顺带抹掉 `assets_test.go` 那张「每页加载什么」的表。
+- `controls.html`：主题/语言按钮，原先在 `index.html` 与 `login.html` 各一份。
+- 装配收敛成 `web.LoadTemplates()` 一处：`main.go` 与测试脚手架原先各写一份 `ParseFS` glob，加目录时漏一处就会出现「测试绿的、线上没片段」。
+- `icons.html`（45 个内联 SVG → sprite）与 `modal.html` 挪到阶段四做：那两处标记马上要跟着视觉重绘改，现在抽出来等于抽完再拆一遍。
 
-**完成判据**：`tokens.css` 之外 CSS 文件十六进制色号数 = 0；页面观感不变（截图对比）。
+顺带修的既有缺陷，四项里三项落地：`index.html` / `login.html` / `error.html` 缺 `viewport-fit=cover`（现由 `head.html` 统一带上）；§4 的 `--panel-bg` 等死引用；`embed.html` 自带一段内联 `<style>`，与三个 css 文件并成第 4 个样式真源（已并进 `viewer.css`）。第四项——`error.html` 加载 `app.js` 却不加载 `toast.js`——查过 `app.js` 后判定**不是缺陷**：`initForm()` 没有 `#register-form` 就早退，`loadSites()` 卡在 `#sites-list` 上，错误页没有任何路径会走到 `toast`，所以不给它加一个纯占位的 script 标签。
+
+**完成判据**（实测）：`tokens.css` 之外色号与变量定义数 = 0、`backdrop-filter` = 0、`:root:not(` 双写 = 0、px 字号 = 0，全部由 `design_tokens_test.go` 守；根字号计算值 14px；首页 / viewer / 嵌入页 / 404 / 登录页在浅色与暗色下截图比对，观感除玻璃拟态消失外无变化。
 
 ### 阶段二 · 拆 viewer 内联脚本
 
@@ -89,7 +94,7 @@ CSP 为 `script-src 'self' 'nonce-…'`，`'self'` 本就放开，外链脚本�
 
 ## 6. 防护措施
 
-前端零测试，且零构建仓库里引 npm 测试栈是自找麻烦，所以约束用 **Go 测试正则守住**：禁止 `tokens.css` 之外出现色号、禁止 `backdrop-filter`、禁止 `data-en=` 残留。
+前端零测试，且零构建仓库里引 npm 测试栈是自找麻烦，所以约束用 **Go 测试正则守住**。已落地（`internal/server/design_tokens_test.go`，读的是嵌入 FS 里的产物而不是磁盘文件）：`tokens.css` 之外禁色号与变量定义、禁 `backdrop-filter` 与 `--glass-*`、禁 `:root:not(` 双写、禁 px 字号、消费的变量必须已定义、浅色里是颜色的变量暗色块必须有值（无豁免清单）。`web/embed_test.go` 守模板名不跨目录撞车，`internal/server/template_render_test.go` 逐页执行模板确认片段齐且只加载一次 `theme.js`。阶段三再补 `data-en=` 残留那条。
 
 已有的 `internal/server/` 表驱动冒烟（`server_test.go` / `assets_test.go` / `csp_test.go`）覆盖：每个路由渲染哪个模板、带哪些资源、资源是否 200、viewer 的 CSP nonce。
 
@@ -102,6 +107,8 @@ CSP 为 `script-src 'self' 'nonce-…'`，`'self'` 本就放开，外链脚本�
 3. `fix(viewer)` — 停靠侧栏随页头收起联动上移、停靠标题栏回到天然高度、站点列表按钮双语提示
 4. `test(server)` — viewer CSP nonce 基线
 5. `style` — 全量 `gofmt`，纯空白，`gofmt -l .` 现已为空
+
+工作区待提（阶段一，2026-08-30）：`tokens.css` 成为唯一设计真源 + 模板骨架。13 个已跟踪文件 `+228 / −466`，新增 `tokens.css` 135 行、两个 partial 14 行、三个守门测试 334 行。`go test ./...` 与 `go vet ./...` 全绿，`gofmt -l .` 为空；首页 / viewer / 嵌入页 / 404 / 登录页已在浏览器实测（含主题与语言开关）。
 
 ## 8. 不在本次范围
 
