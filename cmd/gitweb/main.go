@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"flag"
-	"html/template"
 	"io/fs"
 	"log"
 	"net/http"
@@ -140,11 +139,11 @@ func main() {
 
 	r := srv.SetupRoutes()
 
-	// 从嵌入的 web 目录加载模板（不再依赖外部文件系统）。
-	// safehtml：标记已渲染的 HTML 片段为安全（embed 页面注入渲染结果用）。
-	tpl := template.Must(template.New("").Funcs(template.FuncMap{
-		"safehtml": func(s string) template.HTML { return template.HTML(s) },
-	}).ParseFS(web.Templates, "templates/*.html"))
+	// 从嵌入的 web 目录加载模板与公共片段（不再依赖外部文件系统）。
+	tpl, err := web.LoadTemplates()
+	if err != nil {
+		log.Fatalf("Failed to load templates: %v", err)
+	}
 	r.SetHTMLTemplate(tpl)
 
 	// 静态资源也从嵌入 FS serve（去掉一层 static/ 前缀）。

@@ -31,9 +31,9 @@ func assertAssetsResolve(t *testing.T, r *gin.Engine, body string) {
 }
 
 // TestPageResourceManifest 是模板渲染冒烟基线：锁定「每个页面加载哪些 css/js」
-// 与 viewer 的 CSP/nonce。重构（CP1 抽 head partial）会刻意改动它，届时应显式更新
-// 本表而不是让它静默通过——历史上 error.html 加载 app.js 却不加载 toast.js
-// 导致 toast 未定义，就是缺这层断言才没被发现。
+// 与 viewer 的 CSP/nonce。下一步把各页 head 抽成公共片段时会刻意改动这张表，
+// 届时应显式更新本表而不是让它静默通过——每个页面都只用得到的脚本子集，
+// 少带一个就会留下「某脚本引用了别处定义的全局」这类只有点开才炸的洞。
 func TestPageResourceManifest(t *testing.T) {
 	r, reg := newTestServer(t)
 	if _, err := reg.Register("https://github.com/o/demo.git", "demo", "main", "github", nil, false); err != nil {

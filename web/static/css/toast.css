@@ -18,18 +18,16 @@
     gap: 10px;
     padding: 11px 12px 11px 13px;
     border-radius: var(--r-md);
-    background: var(--glass-bg);
-    backdrop-filter: blur(var(--glass-blur));
-    -webkit-backdrop-filter: blur(var(--glass-blur));
+    background: var(--surface);
     border: 1px solid var(--border);
     box-shadow: var(--shadow-lg);
     color: var(--fg);
-    font-size: 13px;
+    font-size: 0.929rem;
     line-height: 1.45;
     opacity: 0;
     transform: translateX(-14px) scale(0.98);
-    transition: opacity 0.22s cubic-bezier(0.16, 1, 0.3, 1),
-                transform 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+    transition: opacity 0.22s var(--ease-apple),
+                transform 0.28s var(--ease-apple);
     overflow: hidden;
 }
 .toast-item.visible {
@@ -72,15 +70,13 @@
 
 /* 类型色调（只染图标，文字保持中性） */
 .toast-info .toast-icon { color: var(--accent); }
-.toast-success .toast-icon { color: #16a34a; }
-.toast-error .toast-icon { color: #dc2626; }
+.toast-success .toast-icon { color: var(--success); }
+.toast-error .toast-icon { color: var(--error); }
+/* 浮窗悬在任意页面内容之上，底色必须不透：用 surface 打底再叠一层语义色 */
 .toast-error {
-    border-color: rgba(220, 38, 38, 0.28);
-    background: rgba(254, 242, 242, 0.92);
-}
-[data-theme="dark"] .toast-error, :root:not([data-theme="light"]) .toast-error {
-    background: rgba(76, 16, 16, 0.78);
-    border-color: rgba(220, 38, 38, 0.4);
+    border-color: var(--error-border);
+    background-color: var(--surface);
+    background-image: linear-gradient(var(--error-soft), var(--error-soft));
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -90,5 +86,5 @@
 /* 小屏：贴左下、留出更宽边距 */
 @media (max-width: 480px) {
     .toast-container { left: 12px; right: 12px; bottom: 12px; max-width: none; }
-    .toast-item { font-size: 12.5px; }
+    .toast-item { font-size: 0.893rem; }
 }

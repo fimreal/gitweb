@@ -1,0 +1,135 @@
+/* 设计真源。style.css / viewer.css / toast.css 只消费本文件的变量，不得再定义或写死色号。
+   这条约定由 internal/server/design_tokens_test.go 用正则守住（零构建仓库不引 npm lint）。 */
+
+:root {
+    color-scheme: light;
+
+    /* 基准字号 14px：所有 rem 相对它，密度靠这里调，不靠压行高 */
+    font-size: 87.5%;
+
+    /* ---------- 中性色阶：slate ----------
+       首页原本就在 slate 上（--fg #0f172a = slate-900），viewer 的 neutral(#1a1a1a)
+       与 gray(#e5e7eb) 两套并存，统一收敛到 slate 同一条轴。 */
+    --bg: #ffffff;
+    --surface: #ffffff;
+    --fg: #0f172a;
+    --secondary: #475569;
+    --tertiary: #64748b;
+    --border: #e2e8f0;
+    /* 直接落在页面底色上的控件（圆形按钮、气泡）需要更明确的一道边界，
+       否则暗色下 --border 与 --surface 同阶、控件像被吞掉。 */
+    --border-strong: #cbd5e1;
+    --panel-bg: #f8fafc;
+    --hover-bg: #f1f5f9;
+    --input-bg: #f8fafc;
+    --card-bg: #ffffff;
+    --code-bg: #f6f8fa;
+
+    /* ---------- 强调色 ----------
+       --accent 用于链接与图标；主按钮底色单独给 --accent-solid，
+       保证白字在它上面始终过 AA。 */
+    --accent: #2563eb;
+    --accent-hover: #1d4ed8;
+    --accent-solid: #2563eb;
+    --accent-solid-hover: #1d4ed8;
+    --accent-soft: rgba(37, 99, 235, 0.10);
+    --on-accent: #ffffff;
+    --success: #059669;
+    --error: #dc2626;
+    --warn: #92400e;
+    --success-soft: rgba(5, 150, 105, 0.10);
+    --success-border: rgba(5, 150, 105, 0.32);
+    --error-soft: rgba(220, 38, 38, 0.10);
+    --error-border: rgba(220, 38, 38, 0.32);
+    --warn-soft: rgba(180, 83, 9, 0.10);
+    --warn-border: rgba(180, 83, 9, 0.28);
+    --scrim: rgba(15, 23, 42, 0.45);
+    --knob: #ffffff;
+    /* 预览 iframe 的纸面：嵌进去的是任意用户 HTML，默认按白底写样式，
+       两种主题下都保持白色，不跟页面走。 */
+    --iframe-bg: #ffffff;
+
+    /* ---------- 圆角：一组紧凑刻度 ----------
+       原先 10/14/18/22 与 8/12/16/20 两套并存，工程工具风偏紧。 */
+    --r-sm: 6px;
+    --r-md: 8px;
+    --r-lg: 12px;
+    --r-xl: 16px;
+    --r-pill: 999px;
+
+    /* 字体栈：此前两套都不含中文，中文实际一直在吃浏览器 fallback */
+    --font-sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto,
+                 'Helvetica Neue', Arial, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+
+    --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06), 0 1px 3px rgba(15, 23, 42, 0.04);
+    --shadow-md: 0 4px 12px rgba(15, 23, 42, 0.08), 0 2px 4px rgba(15, 23, 42, 0.04);
+    --shadow-lg: 0 12px 28px rgba(15, 23, 42, 0.10), 0 4px 10px rgba(15, 23, 42, 0.06);
+    --shadow-xl: 0 24px 56px rgba(15, 23, 42, 0.16), 0 8px 20px rgba(15, 23, 42, 0.08);
+
+    --ease-apple: cubic-bezier(0.16, 1, 0.3, 1);
+    --ease-snap: cubic-bezier(0.32, 0.72, 0, 1);
+    --snap-scale: 0.75;
+
+    /* ---------- 几何 ----------
+       --header-h / --dock-w / --dock-h 由 viewer 脚本在运行时按实测覆写。 */
+    --header-h: 52px;
+    --dock-w: 300px;
+    --dock-h: 320px;
+}
+
+[data-theme="dark"] {
+    color-scheme: dark;
+
+    /* 900 作底、800 作面、700 作悬停：三级台阶都在 slate 上 */
+    --bg: #0f172a;
+    --surface: #0f172a;
+    --fg: #e2e8f0;
+    --secondary: #94a3b8;
+    --tertiary: #64748b;
+    --border: #1e293b;
+    --border-strong: #334155;
+    --panel-bg: #1e293b;
+    --hover-bg: #334155;
+    /* 输入框在暗色下比卡片面再暗一档，用「凹进去」而不是「描边」区分字段，
+       否则字段与卡片同色，只剩一条看不见的边框。 */
+    --input-bg: #0f172a;
+    --card-bg: #1e293b;
+    --code-bg: #1e293b;
+
+    --accent: #60a5fa;
+    --accent-hover: #93c5fd;
+    --accent-solid: #1d4ed8;
+    --accent-solid-hover: #1e40af;
+    --accent-soft: rgba(96, 165, 250, 0.16);
+    --on-accent: #ffffff;
+    --success: #34d399;
+    --error: #f87171;
+    --warn: #fbbf24;
+    --success-soft: rgba(52, 211, 153, 0.14);
+    --success-border: rgba(52, 211, 153, 0.32);
+    --error-soft: rgba(248, 113, 113, 0.14);
+    --error-border: rgba(248, 113, 113, 0.34);
+    --warn-soft: rgba(251, 191, 36, 0.14);
+    --warn-border: rgba(251, 191, 36, 0.30);
+    --scrim: rgba(2, 6, 23, 0.62);
+    --knob: #f8fafc;
+    --iframe-bg: #ffffff; /* 与浅色同值：预览 iframe 刻意不跟主题，见 :root 处注释 */
+
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.28);
+    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.30);
+    --shadow-lg: 0 12px 28px rgba(0, 0, 0, 0.32);
+    --shadow-xl: 0 24px 56px rgba(0, 0, 0, 0.36);
+}
+
+/* ---------- 全局基线 ----------
+   表单控件不吃根字号：浏览器 UA 样式给 button/input 写死 13.333px Arial，
+   「基准 14」对按钮与输入框就不生效。只继承 family 与 size，不动 line-height，
+   免得控件高度跟着变。 */
+button,
+input,
+select,
+textarea {
+    font-family: inherit;
+    font-size: inherit;
+}
