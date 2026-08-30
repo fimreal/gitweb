@@ -32,7 +32,7 @@ func main() {
 	password := flag.String("password", "", "access password/key (overrides config); if set, all pages require login")
 	httpProxy := flag.String("http-proxy", "", "HTTP proxy (overrides config and env)")
 	httpsProxy := flag.String("https-proxy", "", "HTTPS proxy (overrides config and env)")
-	statePath := flag.String("state", "", "path to state file for persisted sites; empty = in-memory only (default: $GITWEB_STATE, else ./gitweb.state.json)")
+	statePath := flag.String("state", "", "path to state file for persisted sites; empty = in-memory only (overrides config state_file; default: $GITWEB_STATE, else ./gitweb.state.json)")
 	allowHosts := flag.String("allow-host", "", "comma-separated extra hosts to allow through SSRF (e.g. git.example.com); for trusted self-hosted instances that resolve to private IPs")
 	showVersion := flag.Bool("v", false, "print version and exit")
 	flag.Parse()
@@ -90,7 +90,7 @@ func main() {
 		cfg.Fetch.AllowHosts = append(cfg.Fetch.AllowHosts, extra...)
 	}
 
-	// state 路径：显式 -state > GITWEB_STATE > 内置默认。
+	// state 路径：显式 -state > config 的 state_file > GITWEB_STATE > 内置默认。
 	envValue, envSet := os.LookupEnv("GITWEB_STATE")
 	stateFlagSet := false
 	flag.Visit(func(f *flag.Flag) {
@@ -98,7 +98,13 @@ func main() {
 			stateFlagSet = true
 		}
 	})
-	stateFile := resolveStatePath(*statePath, stateFlagSet, envValue, envSet)
+	stateFile := resolveStatePath(statePathSources{
+		flagValue: *statePath,
+		flagSet:   stateFlagSet,
+		cfgValue:  cfg.StateFile,
+		envValue:  envValue,
+		envSet:    envSet,
+	})
 
 	reg := registry.New()
 	if stateFile != "" {
@@ -200,19 +206,33 @@ func main() {
 	reg.Close()
 }
 
-// defaultStatePath 是 -state 与 GITWEB_STATE 都未指定时的落盘位置。它是相对路径，
-// 实际落在哪取决于进程的工作目录，因此启动日志会打印解析后的绝对路径。
+// defaultStatePath 是 -state、config 的 state_file 与 GITWEB_STATE 都未指定时的落盘位置。
+// 它是相对路径，实际落在哪取决于进程的工作目录，因此启动日志会打印解析后的绝对路径。
 const defaultStatePath = "./gitweb.state.json"
 
-// resolveStatePath 按「显式 -state > GITWEB_STATE > 默认值」解析 state 路径。
-// 空串在任一层都表示「纯内存、不落盘」，所以调用方须用 flag.Visit 区分「没传 -state」
-// 与「传了 -state ""」——否则关持久化的意图会被 env 或默认值覆盖掉。
-func resolveStatePath(flagValue string, flagSet bool, envValue string, envSet bool) string {
-	if flagSet {
-		return flagValue
+// statePathSources 是 state 路径的四个来源，优先级从高到低排列。
+// 用结构体而非位置参数：四个来源里混着 bool 与不同空值语义，按顺序传极易读错。
+type statePathSources struct {
+	flagValue string // -state 的值
+	flagSet   bool   // 是否显式传了 -state（由 flag.Visit 判定）
+	cfgValue  string // config.yaml 的 state_file；空 = 未配置，继续向下继承
+	envValue  string // GITWEB_STATE 的值
+	envSet    bool   // GITWEB_STATE 是否存在
+}
+
+// resolveStatePath 按「显式 -state > config state_file > GITWEB_STATE > 默认值」解析 state 路径。
+// 只有 flag 与 env 两层用「是否显式给出」判定，因为空串在那两层表示「纯内存、不落盘」，
+// 按值非空判会让关掉持久化的意图被下一层覆盖。config 层相反：空值只是未配置——本文件整份会过
+// os.ExpandEnv，把 state_file: ${VAR} 未赋值的空串当成「关掉」就等于把静默丢站点重新请回来。
+func resolveStatePath(s statePathSources) string {
+	switch {
+	case s.flagSet:
+		return s.flagValue
+	case s.cfgValue != "":
+		return s.cfgValue
+	case s.envSet:
+		return s.envValue
+	default:
+		return defaultStatePath
 	}
-	if envSet {
-		return envValue
-	}
-	return defaultStatePath
 }

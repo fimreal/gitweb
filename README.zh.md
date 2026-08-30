@@ -75,6 +75,11 @@ listen: ":8080"
 # 留空或不设置则默认公开访问。
 # password: "your-secret-password"
 
+# 站点注册表落盘位置（详见下文〈站点 state 文件〉）。
+# 留空或不写这一行都视为未配置，回落到 $GITWEB_STATE / ./gitweb.state.json；
+# 本行不能用来关闭持久化，要纯内存请用 -state "" 或 GITWEB_STATE=""。
+# state_file: /var/lib/gitweb/gitweb.state.json
+
 cache:
   ttl: 60s
   max_entries: 2048
@@ -103,9 +108,11 @@ sites:
 
 运行期添加的站点会落盘到一个 JSON 文件，从而跨重启保留。
 
-- **路径**：`-state /path/to/state.json`，其次 `$GITWEB_STATE`，最后才是 `./gitweb.state.json`。
-  任一层取空值（`-state ""` 或 `GITWEB_STATE=""`）即以纯内存运行 —— 重启后运行期添加的站点全部丢失。
-- **优先级**：显式 `-state` > `GITWEB_STATE` > 内置默认值。
+- **路径**：`config.yaml` 里的 `state_file`、命令行 `-state`、环境变量 `GITWEB_STATE` 三处任选。
+  `-state ""` 或 `GITWEB_STATE=""` 即以纯内存运行 —— 重启后运行期添加的站点全部丢失。
+  `state_file` 取空值不属于这两种：它表示「未配置」，会继续向下一层继承。原因是 `config.yaml`
+  整份会做环境变量展开，未赋值的 `${VAR}` 就是空串，把空值当「关掉」等于让一个漏设的变量静默丢站点。
+- **优先级**：显式 `-state` > `state_file` > `GITWEB_STATE` > 内置默认值（`./gitweb.state.json`）。
 - **存什么**：路径 ID、git URL、ref、平台、创建时间、浏览数、hidden 标记。**绝不存凭据** ——
   token 与密码只留在浏览器（sessionStorage）里。
 - **与 config 中 `sites:` 的关系**：state 优先。预置站点只在其 pathid / git_url 尚未注册时才补种，
@@ -113,7 +120,8 @@ sites:
 
 两个运维上的坑：
 
-- 默认值 `./gitweb.state.json` 是相对**进程当前工作目录**解析的，不是二进制所在目录。在 systemd
+- 默认值 `./gitweb.state.json` —— 以及 `state_file` 里写的任何相对路径 —— 都是相对**进程当前
+  工作目录**解析的，既不相对二进制所在目录，也不相对 `config.yaml` 所在目录。在 systemd
   或各类守护进程下，这个目录往往不是你以为的那个，而且服务账号未必有写权限。部署时请给绝对路径；
   启动日志会打印解析后的绝对路径和有效 uid。
 - 一个 state 文件只能有**一个写者**。每次落盘都会用该进程内存里的完整注册表重写整个文件，

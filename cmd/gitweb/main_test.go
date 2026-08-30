@@ -2,25 +2,23 @@ package main
 
 import "testing"
 
-// state 路径的三层优先级里，"显式传空串关掉持久化" 与 "没传" 必须可区分，
-// 否则关不掉、或该落盘的配置被静默覆盖。
+// state 路径四层里，flag 与 env 的「显式空串」= 纯内存，必须与「没给」可区分，
+// 否则关不掉持久化；config 层的 state_file 相反，空值只是未配置、继续向下继承。
 func TestResolveStatePath(t *testing.T) {
 	for _, tc := range []struct {
-		name      string
-		flagValue string
-		flagSet   bool
-		envValue  string
-		envSet    bool
-		want      string
+		name string
+		src  statePathSources
+		want string
 	}{
-		{"neither set falls back to default", "", false, "", false, defaultStatePath},
-		{"env wins over default", "", false, "/data/state.json", true, "/data/state.json"},
-		{"explicit empty env disables persistence", "", false, "", true, ""},
-		{"flag wins over env", "/a/state.json", true, "/b/state.json", true, "/a/state.json"},
-		{"flag empty disables persistence despite env", "", true, "/b/state.json", true, ""},
+		{"nothing set", statePathSources{}, defaultStatePath},
+		{"env wins over default", statePathSources{envValue: "/e.json", envSet: true}, "/e.json"},
+		{"explicit empty env disables persistence", statePathSources{envSet: true}, ""},
+		{"config wins over env", statePathSources{cfgValue: "/c.json", envValue: "/e.json", envSet: true}, "/c.json"},
+		{"empty config line inherits env", statePathSources{cfgValue: "", envValue: "/e.json", envSet: true}, "/e.json"},
+		{"flag wins over config and env", statePathSources{flagValue: "/f.json", flagSet: true, cfgValue: "/c.json", envValue: "/e.json", envSet: true}, "/f.json"},
+		{"flag empty disables persistence despite config", statePathSources{flagSet: true, cfgValue: "/c.json"}, ""},
 	} {
-		got := resolveStatePath(tc.flagValue, tc.flagSet, tc.envValue, tc.envSet)
-		if got != tc.want {
+		if got := resolveStatePath(tc.src); got != tc.want {
 			t.Errorf("%s: got %q, want %q", tc.name, got, tc.want)
 		}
 	}

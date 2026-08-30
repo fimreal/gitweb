@@ -75,6 +75,11 @@ listen: ":8080"
 # Leave empty / unset for public access (the default).
 # password: "your-secret-password"
 
+# Where the site registry is persisted (see "Site state file" below).
+# Empty / omitted falls back to $GITWEB_STATE / ./gitweb.state.json — it does not disable
+# persistence. Use `-state ""` or `GITWEB_STATE=""` for a memory-only run.
+# state_file: /var/lib/gitweb/gitweb.state.json
+
 cache:
   ttl: 60s
   max_entries: 2048
@@ -106,10 +111,13 @@ sites:
 
 Sites added at runtime are persisted to one JSON file so they survive restarts.
 
-- **Path**: `-state /path/to/state.json`, falling back to `$GITWEB_STATE`, then
-  `./gitweb.state.json`. An empty value at either level (`-state ""` or `GITWEB_STATE=""`)
-  runs memory-only — every runtime-registered site is then lost on restart.
-- **Priority**: explicit `-state` > `GITWEB_STATE` > built-in default.
+- **Path**: `state_file` in `config.yaml`, the `-state` flag, or `$GITWEB_STATE`. An empty
+  `-state` or `GITWEB_STATE=""` runs memory-only — every runtime-registered site is then lost on
+  restart. An empty `state_file` is *not* one of those: it means "not configured" and falls
+  through to the next source, because `config.yaml` is expanded against the environment and an
+  unset `${VAR}` would otherwise silently turn persistence off.
+- **Priority**: explicit `-state` > `state_file` > `GITWEB_STATE` > built-in default
+  (`./gitweb.state.json`).
 - **Contents**: path ID, git URL, ref, provider, created time, view count, hidden flag.
   **Never credentials** — tokens and passwords stay in the browser (sessionStorage).
 - **Relation to `sites:` in config**: the state file wins. Preset sites are seeded only when
@@ -118,10 +126,11 @@ Sites added at runtime are persisted to one JSON file so they survive restarts.
 
 Two operational traps:
 
-- The default `./gitweb.state.json` resolves against the **process working directory**, not the
-  directory holding the binary. Under systemd or a supervisor that is often not where you expect,
-  and the service user may have no write permission there. Pass an absolute path in deployments;
-  the resolved absolute path and the effective uid are printed on startup.
+- The default `./gitweb.state.json` — and any relative `state_file` — resolves against the
+  **process working directory**, not the directory holding the binary and not the one holding
+  `config.yaml`. Under systemd or a supervisor that is often not where you expect, and the
+  service user may have no write permission there. Pass an absolute path in deployments; the
+  resolved absolute path and the effective uid are printed on startup.
 - A state file must have **one writer**. Each save rewrites the whole file from that process's
   in-memory registry, so two instances sharing one path erase each other's sites. Give every
   instance its own path.
