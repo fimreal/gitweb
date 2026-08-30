@@ -150,6 +150,13 @@
                     </div>
                 </div>
             </div>
+            <!-- 加载进度条：骑在标题栏下边框上。做成 header 的子元素，是为了让
+                 head-hidden 的 translateY(-100%) 连带把它一起滑走，无需额外同步。 -->
+            <div class="top-progress" id="top-progress" aria-hidden="true">
+                <div class="top-progress-bar" id="top-progress-bar">
+                    <div class="top-progress-shimmer"></div>
+                </div>
+            </div>
         </div>
         <div class="content-area" id="content-area">
             <div class="welcome" data-en="Click the folder icon at the bottom-right to browse files" data-zh="点右下角文件夹图标浏览文件">点右下角文件夹图标浏览文件</div>
@@ -513,6 +520,7 @@
     // switchRef 切换到任意 ref（分支/tag/commit）：改 currentRef、更新顶部分支名、重载文件树。
     function switchRef(ref) {
         currentRef = ref;
+        contentCache.clear(); // 键虽带 ref，旧 ref 的条目此后永远命中不了，只是白占内存
         const nameEl = document.getElementById('branch-name');
         if (nameEl) nameEl.textContent = ref;
         const content = document.getElementById('floating-tree-content');
@@ -781,11 +789,105 @@
         return {};
     }
 
+    // ---------- 顶部进度条 ----------
+    // 一条线两种驱动：
+    //   1) 拿不到真实字节（后端还没流式、或该类型必须整体渲染）→ 时间缓动逼近 80% 后停滞。
+    //      停在那儿不动 + 微光扫动，表达的是「还在干，只是慢」，比满格或转圈都诚实。
+    //   2) readWithProgress 交出真实字节比例 → 立刻由实测值接管，缓动定时器停手。
+    // 缓动永不自行走到 100%：数据没到手就满格是假信号。
+    var TopBar = (function () {
+        var el = document.getElementById('top-progress');
+        var bar = document.getElementById('top-progress-bar');
+        var reduceMotion = window.matchMedia
+            && window.matchMedia('(prefers-reduced-motion: reduce)');
+        var ASYMPTOTE = 0.8;    // 缓动渐近线（80%）
+        var IDLE_WIDTH = '12%'; // 关掉动效时，静止条唯一能表达的就是「有请求在途」
+        var pending = 0;        // 在途请求数：树与文件并发时不让两者互相抢着收尾
+        var timer = null;
+        var value = 0;
+        var fadeTimer = null;
+
+        function stopEase() {
+            if (timer) { clearInterval(timer); timer = null; }
+        }
+        function startEase() {
+            stopEase();
+            if (reduceMotion && reduceMotion.matches) {
+                bar.style.width = IDLE_WIDTH;
+                return;
+            }
+            timer = setInterval(function () {
+                value += (ASYMPTOTE - value) * 0.03;
+                bar.style.width = (value * 100) + '%';
+            }, 30);
+        }
+
+        return {
+            // 一次请求的开始。返回 token 交给 end/adopt/error，避免全局计数被谁多扣一次。
+            begin: function () {
+                if (fadeTimer) { clearTimeout(fadeTimer); fadeTimer = null; } // 复用还亮着的条
+                pending++;
+                if (pending === 1) {
+                    value = 0;
+                    el.classList.remove('error');
+                    el.classList.add('active', 'indeterminate');
+                    bar.style.width = '0%';
+                    startEase();
+                }
+                return { ended: false, release: null };
+            },
+            // authFetch 返回时约定「没人接管就一个宏任务后收尾」。流式调用方随后同步
+            // adopt 取消这次自动收尾 —— 宏任务排在微任务之后，所以中间不会闪断。
+            armRelease: function (token) {
+                if (!token || token.ended) return;
+                token.release = setTimeout(function () { TopBar.end(token); }, 0);
+            },
+            adopt: function (token) {
+                if (token && token.release) { clearTimeout(token.release); token.release = null; }
+            },
+            tick: function (received, total) {
+                if (!pending || total <= 0) return;
+                stopEase();
+                el.classList.remove('indeterminate');
+                bar.style.width = Math.min(received / total, 1) * 100 + '%';
+            },
+            end: function (token) {
+                if (!token || token.ended) return; // 幂等：armRelease 与显式 end 只算一次
+                token.ended = true;
+                TopBar.adopt(token);
+                pending = Math.max(0, pending - 1);
+                if (pending > 0) return;
+                stopEase();
+                bar.style.width = '100%';
+                fadeTimer = setTimeout(function () {
+                    fadeTimer = null;
+                    el.classList.remove('active', 'indeterminate', 'error');
+                    bar.style.width = '0%';
+                }, 260);
+            },
+            error: function (token) {
+                if (!token || token.ended) return;
+                el.classList.add('error');
+                TopBar.end(token);
+            }
+        };
+    })();
+
     // 带鉴权的 fetch：401 时弹窗要凭据，输入后重试。循环直到成功或用户取消。
+    // 进度条挂在 fetch 上而不是各调用方上：六个调用方共用这一处就全覆盖了。
+    // token 一路活到 body 读完为止 —— fetch 返回只意味着响应头到手，
+    // 树那种几百 KB 的 JSON 还在读 body，此刻收尾会把最慢的一段漏掉。
     async function authFetch(url, opts) {
         opts = opts || {};
         opts.headers = Object.assign({}, opts.headers || {}, authHeader());
-        let resp = await fetch(url, opts);
+        var token = TopBar.begin();
+        var resp;
+        try {
+            resp = await fetch(url, opts);
+        } catch (err) {
+            TopBar.error(token);
+            throw err;
+        }
         while (resp.status === 401) {
             const prevAuth = getStoredAuth();
             sessionStorage.removeItem(STORAGE_KEY);
@@ -794,6 +896,8 @@
             document.cookie = 'gitweb_repo_auth_' + pathID + '=; path=/; max-age=0' + secure;
             authFailed = !!prevAuth;
             lastFailedType = prevAuth ? prevAuth.type : null;
+            // 等用户输入凭据的这段时间不算加载：条子先收尾，别停在 80% 空扫
+            TopBar.end(token);
             const auth = await promptAuth();
             if (!auth) break; // 用户取消 → 返回 401
             authFailed = false;
@@ -804,8 +908,18 @@
                 if (k.toLowerCase() !== 'authorization') baseHeaders[k] = opts.headers[k];
             }
             opts.headers = Object.assign(baseHeaders, authHeader());
-            resp = await fetch(url, opts);
+            token = TopBar.begin();
+            try {
+                resp = await fetch(url, opts);
+            } catch (err) {
+                TopBar.error(token);
+                throw err;
+            }
         }
+        // 流式调用方紧接着同步 readWithProgress(resp) 并 adopt 接管这个 token；
+        // JSON 调用方没人接管，由 armRelease 一个宏任务后收尾。
+        resp.__tb = token;
+        TopBar.armRelease(token);
         return resp;
     }
 
@@ -866,6 +980,8 @@
         // 由「凭据」按钮触发的提交：用户主动更换凭据后，重载文件树以应用新凭据。
         // 401 自动触发的弹窗不需要这里重载——authFetch 会自行重试当前请求。
         if (fromButton) {
+            // 换凭据 = 换可见内容范围：旧身份拉回来的条目不能再端给新身份
+            contentCache.clear();
             const content = document.getElementById('floating-tree-content');
             if (content) content.innerHTML = '<div class="tree-loading">' + (currentLang === 'zh' ? '加载中...' : 'Loading...') + '</div>';
             loadFileTree().then(autoOpenDefault);
@@ -988,6 +1104,7 @@
         if (!files.length) { container.innerHTML = '<div class="tree-empty">' + (currentLang === 'zh' ? '空仓库' : 'Empty repo') + '</div>'; return; }
         container.innerHTML = renderNode(buildTree(files), 0);
         attachTreeEvents();
+        markCachedRows(); // 行 DOM 是重建的，标记必须跟着重打一遍
     }
 
     // 图标内联 SVG（class 受 CSS 控制，颜色随状态切换）
@@ -1035,52 +1152,88 @@
         });
     }
 
-    // ---------- 加载进度条 ----------
+    // ---------- 内容区等待标签 ----------
+    // 真正的进度在标题栏下沿那条线上（TopBar），这里只留一句「在等什么」。
     function showLoadingProgress(area, label) {
-        area.innerHTML = '<div class="loading-progress"><div>' + label + '</div>'
-            + '<div class="progress-bar indeterminate"><div class="progress-fill"></div></div>'
-            + '<div class="progress-text"></div></div>';
-        return area.querySelector('.loading-progress');
+        area.innerHTML = '<div class="loading-progress">' + label + '</div>';
     }
-    function updateProgress(container, received, total) {
-        if (!container) return;
-        const bar = container.querySelector('.progress-bar');
-        const fill = container.querySelector('.progress-fill');
-        const text = container.querySelector('.progress-text');
-        if (total > 0) {
-            bar.classList.remove('indeterminate');
-            const pct = Math.min(Math.round(received / total * 100), 100);
-            fill.style.width = pct + '%';
-            text.textContent = formatBytes(received) + ' / ' + formatBytes(total) + ' (' + pct + '%)';
-        } else {
-            text.textContent = formatBytes(received);
-        }
-    }
-    function formatBytes(n) {
-        if (n < 1024) return n + ' B';
-        if (n < 1048576) return (n / 1024).toFixed(1) + ' KB';
-        return (n / 1048576).toFixed(2) + ' MB';
-    }
-    async function readWithProgress(resp, progressContainer) {
+
+    // 读 body，并把真实字节比例报给顶部进度条。token 是 authFetch 挂在 resp.__tb 上的，
+    // 必须在本函数第一个 await 之前同步 adopt —— 否则 armRelease 的宏任务会先把条收掉。
+    // 拿不到 content-length 时不 tick，让缓动继续兜着。
+    async function readWithProgress(resp) {
+        const token = resp.__tb;
+        if (token) TopBar.adopt(token);
         const total = parseInt(resp.headers.get('content-length') || '0', 10);
-        if (!resp.body || !total) {
-            const text = await resp.text();
-            if (progressContainer) updateProgress(progressContainer, text.length, text.length);
-            return text;
+        try {
+            if (!resp.body || !total) return await resp.text();
+            const reader = resp.body.getReader();
+            const decoder = new TextDecoder();
+            let received = 0;
+            let result = '';
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                received += value.length;
+                result += decoder.decode(value, { stream: true });
+                TopBar.tick(received, total);
+            }
+            result += decoder.decode();
+            return result;
+        } finally {
+            if (token) TopBar.end(token);
         }
-        const reader = resp.body.getReader();
-        const decoder = new TextDecoder();
-        let received = 0;
-        let result = '';
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            received += value.length;
-            result += decoder.decode(value, { stream: true });
-            updateProgress(progressContainer, received, total);
-        }
-        result += decoder.decode();
-        return result;
+    }
+
+    // ---------- 已加载内容缓存 ----------
+    // 来回切文件、切走再切回，不该每次重走一遍网络。命中时直接渲染，进度条压根不出现。
+    // 键带 currentRef 与 raw 标志：同一 path 在不同 ref、或「渲染片段 / 原始源码」两种形态
+    // 下内容完全不同，少一个维度就会串内容。
+    var contentCache = (function () {
+        var map = new Map();      // key -> { text, size }；Map 保持插入序，即 LRU 序
+        var bytes = 0;
+        var MAX_BYTES = 10 * 1048576; // 总量上限约 10MB
+        var MAX_ITEM = 2 * 1048576;   // 单文件超 2MB 不存：很少开第二次，却会把内存吃掉
+        function key(path, raw) { return currentRef + '|' + (raw ? 'r' : 'v') + '|' + path; }
+        return {
+            get: function (path, raw) {
+                var k = key(path, raw);
+                var hit = map.get(k);
+                if (!hit) return null;
+                map.delete(k);
+                map.set(k, hit); // 摸一下 = 最近使用，挪到队尾
+                return hit.text;
+            },
+            set: function (path, raw, text) {
+                if (text.length > MAX_ITEM) return;
+                var k = key(path, raw);
+                if (map.has(k)) { bytes -= map.get(k).size; map.delete(k); }
+                map.set(k, { text: text, size: text.length });
+                bytes += text.length;
+                while (bytes > MAX_BYTES && map.size > 1) {
+                    var oldest = map.keys().next().value;
+                    bytes -= map.get(oldest).size;
+                    map.delete(oldest);
+                }
+                markCachedRows();
+            },
+            // has 只查询，不 bump LRU —— 鼠标扫过不等于「刚用过」。
+            has: function (path) { return map.has(key(path, false)) || map.has(key(path, true)); },
+            clear: function () { map.clear(); bytes = 0; markCachedRows(); }
+        };
+    })();
+
+    // 文件树行末的小圆点：标记「这个文件的内容已在手，再开秒出」。没这个点，用户无从
+    // 知道哪些文件是零网络的，也解释不了为什么这次进度条没出现。
+    // 一律从缓存反推整棵树，而不是只给刚写入的那一行打点：LRU 淘汰会悄悄让某个点失效，
+    // 留着不放就成了撒谎的标识。
+    function markCachedRows() {
+        var tip = currentLang === 'zh' ? '内容已缓存，再开秒出' : 'Cached — reopens instantly';
+        document.querySelectorAll('.file-item[data-path]').forEach(function (item) {
+            var cached = contentCache.has(item.dataset.path);
+            item.classList.toggle('cached', cached);
+            if (cached) item.title = tip; else item.removeAttribute('title');
+        });
     }
 
     // ---------- 文件加载 ----------
@@ -1088,7 +1241,12 @@
     // 源码模式下切换文件复用。图片无源码概念，调用方应自行跳过。
     async function loadFileSource(path) {
         const area = document.getElementById('content-area');
-        const progress = showLoadingProgress(area, currentLang === 'zh' ? '加载源码...' : 'Loading source...');
+        const cached = contentCache.get(path, true);
+        if (cached !== null) {
+            renderTextWithPagination(area, path, '<pre><code>' + escapeHtml(cached) + '</code></pre>');
+            return;
+        }
+        showLoadingProgress(area, currentLang === 'zh' ? '加载源码...' : 'Loading source...');
         try {
             const resp = await authFetch('/' + pathID + '/' + encodeURI(path) + refQuery() + '&raw=1');
             if (!resp.ok) {
@@ -1097,7 +1255,8 @@
                 toast.error(msg);
                 return;
             }
-            const text = await readWithProgress(resp, progress);
+            const text = await readWithProgress(resp);
+            contentCache.set(path, true, text);
             renderTextWithPagination(area, path, '<pre><code>' + escapeHtml(text) + '</code></pre>');
         } catch (err) {
             const msg = currentLang === 'zh' ? '加载失败: ' + err.message : 'Failed: ' + err.message;
@@ -1129,7 +1288,12 @@
                 return;
             }
             // md/txt/代码：后端返回 HTML 片段，前端注入。长内容前端分页。
-            const progress = showLoadingProgress(area, currentLang === 'zh' ? '加载中...' : 'Loading...');
+            const cached = contentCache.get(path, false);
+            if (cached !== null) {
+                renderTextWithPagination(area, path, cached);
+                return;
+            }
+            showLoadingProgress(area, currentLang === 'zh' ? '加载中...' : 'Loading...');
             const resp = await authFetch('/' + pathID + '/' + encodeURI(path) + refQuery());
             if (!resp.ok) {
                 const msg = httpErrorMsg(resp, '加载失败（' + resp.status + '）', 'Failed to load (' + resp.status + ')');
@@ -1137,7 +1301,8 @@
                 toast.error(msg);
                 return;
             }
-            const html = await readWithProgress(resp, progress);
+            const html = await readWithProgress(resp);
+            contentCache.set(path, false, html);
             renderTextWithPagination(area, path, html);
         } catch (err) {
             const msg = currentLang === 'zh' ? '加载失败: ' + err.message : 'Failed to load: ' + err.message;
@@ -1148,11 +1313,12 @@
 
     function renderHTMLInIframe(path) {
         const area = document.getElementById('content-area');
-        const progress = showLoadingProgress(area, currentLang === 'zh' ? '加载中...' : 'Loading...');
-
         const fileURL = '/' + pathID + '/' + encodeURI(path) + refQuery();
-        const openText = currentLang === 'zh' ? '在新标签页打开' : 'Open in new tab';
-        const srcText = currentLang === 'zh' ? '查看源码' : 'View source';
+
+        const cached = contentCache.get(path, false);
+        if (cached !== null) { mountHTMLPreview(area, fileURL, cached); return; }
+
+        showLoadingProgress(area, currentLang === 'zh' ? '加载中...' : 'Loading...');
 
         authFetch(fileURL).then(async resp => {
             if (!resp.ok) {
@@ -1161,31 +1327,37 @@
                 toast.error(msg);
                 return;
             }
-            const html = await readWithProgress(resp, progress);
-
-            const notice = document.createElement('div');
-            notice.className = 'html-notice';
-            const noticeText = currentLang === 'zh'
-                ? '⚠️ HTML 在隔离的沙箱中显示（禁用脚本）。'
-                : '⚠️ HTML is shown in a sandboxed iframe (scripts disabled).';
-            notice.innerHTML = noticeText
-                + '<a href="' + fileURL + '" target="_blank">' + openText + '</a>'
-                + '<a href="' + fileURL + (fileURL.indexOf('?') >= 0 ? '&' : '?') + 'raw=1" target="_blank">' + srcText + '</a>';
-
-            const iframe = document.createElement('iframe');
-            iframe.className = 'html-frame';
-            // 用 srcdoc 注入内容：这样鉴权头只走主页面 fetch，不依赖 iframe 自身请求。
-            // 同时 sandbox 不加 allow-scripts，防止不可信仓库的恶意脚本逃逸。
-            iframe.setAttribute('sandbox', 'allow-same-origin');
-            iframe.srcdoc = html;
-            area.innerHTML = '';
-            area.appendChild(notice);
-            area.appendChild(iframe);
+            const html = await readWithProgress(resp);
+            contentCache.set(path, false, html);
+            mountHTMLPreview(area, fileURL, html);
         }).catch(err => {
             const msg = currentLang === 'zh' ? '加载失败: ' + err.message : 'Failed to load: ' + err.message;
             area.innerHTML = '<div class="error">' + msg + '</div>';
             toast.error(msg);
         });
+    }
+
+    function mountHTMLPreview(area, fileURL, html) {
+        const openText = currentLang === 'zh' ? '在新标签页打开' : 'Open in new tab';
+        const srcText = currentLang === 'zh' ? '查看源码' : 'View source';
+        const notice = document.createElement('div');
+        notice.className = 'html-notice';
+        const noticeText = currentLang === 'zh'
+            ? '⚠️ HTML 在隔离的沙箱中显示（禁用脚本）。'
+            : '⚠️ HTML is shown in a sandboxed iframe (scripts disabled).';
+        notice.innerHTML = noticeText
+            + '<a href="' + fileURL + '" target="_blank">' + openText + '</a>'
+            + '<a href="' + fileURL + (fileURL.indexOf('?') >= 0 ? '&' : '?') + 'raw=1" target="_blank">' + srcText + '</a>';
+
+        const iframe = document.createElement('iframe');
+        iframe.className = 'html-frame';
+        // 用 srcdoc 注入内容：这样鉴权头只走主页面 fetch，不依赖 iframe 自身请求。
+        // 同时 sandbox 不加 allow-scripts，防止不可信仓库的恶意脚本逃逸。
+        iframe.setAttribute('sandbox', 'allow-same-origin');
+        iframe.srcdoc = html;
+        area.innerHTML = '';
+        area.appendChild(notice);
+        area.appendChild(iframe);
     }
 
     // 前端分页：按渲染片段的行数切，每页 maxLines 行。
@@ -2177,6 +2349,7 @@
         function selectRef(ref) {
             if (ref === currentRef) { close(); return; }
             currentRef = ref;
+            contentCache.clear();
             nameEl.textContent = ref;
             close();
             // 重拉文件树；清空当前文件内容（旧分支的文件路径可能不存在）
@@ -2216,6 +2389,9 @@
             refreshBtn.addEventListener('click', () => {
                 if (refreshBtn.classList.contains('spinning')) return; // 防连点
                 refreshBtn.classList.add('spinning');
+                // 刷新是用户唯一的「给我最新内容」入口：不清内容缓存的话，
+                // 点开文件仍会命中旧条目，这次刷新等于没刷。
+                contentCache.clear();
                 const content = document.getElementById('floating-tree-content');
                 if (content) content.innerHTML = '<div class="tree-loading">' + (currentLang === 'zh' ? '刷新中...' : 'Refreshing...') + '</div>';
                 loadFileTree().then(() => {
