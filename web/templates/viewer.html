@@ -296,12 +296,7 @@
         document.addEventListener('gitthemechange', updateThemeBtn);
 
         const toggle = document.getElementById('theme-toggle-viewer');
-        if (toggle) {
-            toggle.addEventListener('click', () => {
-                GitTheme.cycle();
-                closeSettings();
-            });
-        }
+        if (toggle) toggle.addEventListener('click', () => GitTheme.cycle());
     }
 
     function applyLang(lang) {
@@ -346,7 +341,6 @@
             currentLang = currentLang === 'zh' ? 'en' : 'zh';
             localStorage.setItem('lang', currentLang);
             applyLang(currentLang);
-            closeSettings();
         });
     }
 
@@ -422,7 +416,6 @@
             showHidden = !showHidden;
             updateHiddenFilesBtn();
             renderTree(visibleFiles());
-            closeSettings();
         });
     }
 
@@ -482,7 +475,6 @@
             showLineNumbers = !showLineNumbers;
             updateLineNumbersBtn();
             applyLineNumbers();
-            closeSettings();
         });
     }
 
