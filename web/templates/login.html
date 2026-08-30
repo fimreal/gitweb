@@ -1,8 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    {{template "head"}}
     <title>gitweb · Login</title>
     <link rel="stylesheet" href="/static/css/style.css">
     <style>
@@ -20,17 +19,15 @@
             position: relative;
         }
         .login-card {
-            background: var(--glass-bg);
-            -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(160%);
-            backdrop-filter: blur(var(--glass-blur)) saturate(160%);
-            border: 1px solid var(--glass-border);
+            background: var(--card-bg);
+            border: 1px solid var(--border);
             border-radius: var(--r-xl);
-            box-shadow: var(--shadow-xl);
+            box-shadow: var(--shadow-lg);
             padding: 36px 32px;
         }
         .login-card h1 {
             margin: 0 0 6px;
-            font-size: 24px;
+            font-size: 1.714rem;
             font-weight: 700;
             color: var(--fg);
             display: flex;
@@ -51,7 +48,7 @@
         .login-card .sub {
             margin: 0 0 24px;
             color: var(--secondary);
-            font-size: 14px;
+            font-size: 1rem;
         }
         .login-form {
             display: flex;
@@ -63,9 +60,9 @@
             padding: 12px 14px;
             border: 1px solid var(--border);
             border-radius: var(--r-sm);
-            background: var(--panel-bg);
+            background: var(--input-bg);
             color: var(--fg);
-            font-size: 15px;
+            font-size: 1.071rem;
             font-family: inherit;
             outline: none;
             transition: border-color .15s, box-shadow .15s;
@@ -79,43 +76,30 @@
             padding: 12px;
             border: none;
             border-radius: var(--r-sm);
-            background: linear-gradient(135deg, var(--accent) 0%, var(--accent-hover) 100%);
-            color: #fff;
-            font-size: 15px;
+            background: var(--accent-solid);
+            color: var(--on-accent);
+            font-size: 1.071rem;
             font-weight: 600;
             cursor: pointer;
-            transition: transform .15s, box-shadow .15s;
+            transition: background .15s;
             font-family: inherit;
         }
         .login-form button[type="submit"]:hover {
-            transform: translateY(-1px);
-            box-shadow: var(--shadow-md);
+            background: var(--accent-solid-hover);
         }
         .login-form button[type="submit"]:active {
             transform: translateY(0);
         }
         .err {
             color: var(--error);
-            font-size: 13px;
+            font-size: 0.929rem;
             margin: -4px 0 4px;
             min-height: 18px;
         }
-        :root {
-            --error: #dc2626;
-        }
-        [data-theme="dark"] {
-            --error: #f87171;
-        }
     </style>
-    <script src="/static/js/theme.js"></script>
 </head>
 <body>
-    <div class="controls">
-        <button id="theme-toggle" class="icon-btn" data-theme-toggle title="切换主题" aria-label="切换主题">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
-        </button>
-        <button id="lang-toggle" class="icon-btn" title="Switch language" aria-label="Switch language">EN</button>
-    </div>
+    {{template "controls"}}
 
     <div class="login-wrap">
         <div class="login-card">

@@ -1,0 +1,6 @@
+{{- define "head" -}}
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <link rel="stylesheet" href="/static/css/tokens.css">
+    <script src="/static/js/theme.js"></script>{{/* 同步且先于首帧：theme.js 要在 body 渲染前把 data-theme 写到 html 上 */}}
+{{- end -}}

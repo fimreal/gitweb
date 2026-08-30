@@ -2,7 +2,6 @@ package server
 
 import (
 	"encoding/json"
-	"html/template"
 	"io"
 	"io/fs"
 	"net/http"
@@ -21,7 +20,7 @@ import (
 
 const testBaseURL = "http://localhost:8080"
 
-// newTestServer 复刻 cmd/gitweb/main.go:139-155 的装配：Server + 嵌入模板 + 静态资源。
+// newTestServer 复刻 cmd/gitweb/main.go 的装配：Server + web.LoadTemplates() + 静态资源。
 // 模板必须显式挂上，否则 c.HTML 渲染不出页面（main.go 里也是这么做的）；
 // 静态资源也必须挂上，否则页面里引用的 css/js 一律 404，资源存在性断言形同虚设。
 // 可选传入访问密码：/login 仅在设置了密码时渲染，否则 302 跳回首页。
@@ -41,9 +40,10 @@ func newTestServer(t *testing.T, password ...string) (*gin.Engine, *registry.Reg
 	srv := New(reg, prov, cache.New(time.Minute, 16), render.New(), testBaseURL, pw)
 
 	r := srv.SetupRoutes()
-	tpl := template.Must(template.New("").Funcs(template.FuncMap{
-		"safehtml": func(s string) template.HTML { return template.HTML(s) },
-	}).ParseFS(web.Templates, "templates/*.html"))
+	tpl, err := web.LoadTemplates()
+	if err != nil {
+		t.Fatalf("load templates: %v", err)
+	}
 	r.SetHTMLTemplate(tpl)
 
 	staticFS, err := fs.Sub(web.Static, "static")
