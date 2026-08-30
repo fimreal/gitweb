@@ -135,8 +135,9 @@ gitweb 是一个用 Go + Gin 实现的轻量服务：给定任意 git 仓库地�
   `Get`、`ListPublic`（仅返回 `Hidden=false` 的站点，用于公开 `/api/sites`）、
   `Remove`、`SetHidden`（运行时切换可见性）、`IncrementViews`（浏览数 +1 并置 dirty）、
   `HasGitURL`（预置去重用）。
-- **持久化**（可选）：`EnablePersistence(path)` 加载 state 文件并启动后台 flush
-  goroutine，每 5 秒把 dirty 的浏览数与注册表增量落盘；`Close()` 触发最终 flush。
+- **持久化**（可选）：`EnablePersistence(path)` 先对目标目录做可写探针（不可写返回 error，
+  由 `main` 拒绝启动，见 §6），再加载 state 文件并启动后台 flush goroutine，每 5 秒把
+  dirty 的浏览数对应的注册表快照全量重写落盘；`Close()` 触发最终 flush。
   state 文件字段向后兼容（`views`/`hidden` 用 `omitempty`，旧文件可读）。
   未启用持久化时退化为纯内存，重启即失。
 
@@ -253,6 +254,10 @@ gitweb 是一个用 Go + Gin 实现的轻量服务：给定任意 git 仓库地�
 base_url: https://gitweb.example.com   # 用于生成可访问链接，反代场景见 §8
 listen: ":8080"
 # password: "your-secret"              # 可选全局访问密码；留空 = 公开访问（默认）
+# state_file: /var/lib/gitweb/gitweb.state.json
+#                                      ^ 注册表落盘路径；服务化部署请给绝对路径（相对路径跟进程 CWD 走）
+#                                      留空/不写/`${VAR}` 未赋值 = 未配置，继续继承 GITWEB_STATE 再落默认值，
+#                                      不表示关闭持久化；要纯内存只能用 `-state ""` 或 `GITWEB_STATE=""`
 cache:
   ttl: 60s
   max_entries: 2048
@@ -288,12 +293,20 @@ sites:                                  # 启动时预置站点
 -http-proxy     HTTP 代理
 -https-proxy    HTTPS 代理
 -allow-host     追加 SSRF allow_hosts（逗号分隔，用于可信自托管内网实例）
--state          state 文件路径（默认 ./gitweb.state.json；空 = 纯内存）
+-state          state 文件路径；四层优先级 显式 -state > config state_file > GITWEB_STATE
+                > 默认 ./gitweb.state.json。此参数给空串 = 纯内存（重启丢运行期站点）
 -v              打印版本退出
 ```
 
-state 文件：站点注册表 + 浏览数的持久化载体，启动加载、退出 flush、运行期每 5 秒
-增量落盘。预置站点与 state 合并时，pathid 已存在则跳过（state 为运行时唯一真相源）。
+state 文件：站点注册表 + 浏览数的持久化载体，启动加载、退出 flush、运行期浏览数每 5 秒
+去重后落盘一次。落盘是「在同目录建临时文件写完再 rename」的全量快照覆盖，因此一个文件
+只允许有一个写者；只保证可见性原子，未做 fsync。预置站点与 state 合并时，pathid 已存在
+则跳过（state 为运行时唯一真相源）。
+
+启动时先用与落盘完全相同的路径建删一个临时文件做可写探针：目标目录不可写（例如 `-state`
+的相对路径跟进程 CWD 走、落到没权限的目录）即拒绝启动，不再带着写不进去的持久化静默运行；
+成功则把解析后的绝对路径与运行 uid 打进启动日志。运行期单次落盘失败仍只记日志不回滚：
+那是偶发 IO 错而非配置错，回滚会让已注册站点的请求变 400，状态更不一致。
 
 ## 7. 错误处理
 
