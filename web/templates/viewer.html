@@ -2067,6 +2067,13 @@
         const header = document.querySelector('.viewer-header');
         if (!area || !header) return;
 
+        // head-hidden 会在滚动/悬停/触屏多处被切换，逐个改调用点容易漏；
+        // 这里镜像到 <html>，让停靠侧栏的 top/height 能随页头收起一起上移。
+        new MutationObserver(() => {
+            document.documentElement.classList
+                .toggle('head-hidden', header.classList.contains('head-hidden'));
+        }).observe(header, { attributes: true, attributeFilter: ['class'] });
+
         let lastY = area.scrollTop;
         let ticking = false;
         const TOP_THRESHOLD = 8;   // 离顶小于此值视为贴顶，常显
