@@ -566,16 +566,16 @@ func (s *Server) handleSiteFile(c *gin.Context) {
 		s.registry.IncrementViews(pathID)
 		c.Header("Content-Security-Policy", viewerCSP(nonce))
 		c.HTML(http.StatusOK, "viewer.html", gin.H{
-			"PathID":     pathID,
-			"GitURL":     site.GitURL,
-			"Ref":        site.Ref,
-			"Provider":   site.Provider,
-			"CreatedAt":  site.CreatedAt,
+			"PathID":        pathID,
+			"GitURL":        site.GitURL,
+			"Ref":           site.Ref,
+			"Provider":      site.Provider,
+			"CreatedAt":     site.CreatedAt,
 			"HasPresetAuth": site.Auth != nil, // 预置了凭据（私有仓库预置）；运行时注册恒为 false
-			"RepoName":   repoNameFromURL(site.GitURL),
-			"Views":      site.Views + 1, // +1 包含本次访问
-			"Nonce":      nonce,
-			"Hidden":     site.Hidden,
+			"RepoName":      repoNameFromURL(site.GitURL),
+			"Views":         site.Views + 1, // +1 包含本次访问
+			"Nonce":         nonce,
+			"Hidden":        site.Hidden,
 		})
 		return
 	}

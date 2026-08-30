@@ -30,7 +30,7 @@ type Site struct {
 	Provider  string
 	CreatedAt time.Time
 	Views     int64 // 站点被打开（viewer 页面）的次数；内存累加，防抖落盘
-	Hidden    bool // 仅创建时可设。true=不进公开 /api/sites 列表，直链 /{pathid}/ 仍可访问
+	Hidden    bool  // 仅创建时可设。true=不进公开 /api/sites 列表，直链 /{pathid}/ 仍可访问
 }
 
 type Registry struct {

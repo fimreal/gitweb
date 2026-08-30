@@ -16,12 +16,12 @@ import (
 type Kind int
 
 const (
-	KindHTML      Kind = iota // .html/.htm：原样透传，前端用 iframe sandbox 承载
-	KindMarkdown             // .md/.markdown：goldmark 转 HTML 片段
-	KindText                 // 纯文本/代码/配置：转义后放 <pre><code>
-	KindImage                // 图片：透传原始字节，前端 <img>
-	KindBinary               // 其它二进制：透传，前端提示下载
-	KindUnsupported          // 不支持预览
+	KindHTML        Kind = iota // .html/.htm：原样透传，前端用 iframe sandbox 承载
+	KindMarkdown                // .md/.markdown：goldmark 转 HTML 片段
+	KindText                    // 纯文本/代码/配置：转义后放 <pre><code>
+	KindImage                   // 图片：透传原始字节，前端 <img>
+	KindBinary                  // 其它二进制：透传，前端提示下载
+	KindUnsupported             // 不支持预览
 )
 
 // renderableExts 是全项目唯一的「可渲染文本扩展名」权威表。

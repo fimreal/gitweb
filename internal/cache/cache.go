@@ -9,15 +9,15 @@ import (
 
 // entry 缓存项：数据 + 过期时间。
 type entry struct {
-	data      []byte
-	expireAt  time.Time
+	data     []byte
+	expireAt time.Time
 }
 
 // Cache 是进程内 LRU + TTL 缓存。键约定为 "pathid:filepath" 形式。
 // 命中时由 lru 自动刷新访问顺序（真 LRU）；过期条目在 Get 时惰性删除。
 type Cache struct {
-	c        *lru.Cache[string, *entry]
-	ttl      time.Duration
+	c   *lru.Cache[string, *entry]
+	ttl time.Duration
 }
 
 // New 创建缓存。ttl 为单条有效期，maxEntries 为容量上限（LRU 驱逐）。
