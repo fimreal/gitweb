@@ -1,0 +1,250 @@
+package server
+
+import (
+	"encoding/json"
+	"html/template"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/fimreal/gitweb/internal/cache"
+	"github.com/fimreal/gitweb/internal/provider"
+	"github.com/fimreal/gitweb/internal/registry"
+	"github.com/fimreal/gitweb/internal/render"
+	"github.com/fimreal/gitweb/web"
+)
+
+const testBaseURL = "http://localhost:8080"
+
+// newTestServer 复刻 cmd/gitweb/main.go 的装配：Server + 嵌入模板。
+// 模板必须显式挂上，否则 c.HTML 渲染不出页面（main.go 里也是这么做的）。
+// 可选传入访问密码：/login 仅在设置了密码时渲染，否则 302 跳回首页。
+func newTestServer(t *testing.T, password ...string) (*gin.Engine, *registry.Registry) {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	gin.DefaultWriter = io.Discard
+	gin.DefaultErrorWriter = io.Discard
+
+	pw := ""
+	if len(password) > 0 {
+		pw = password[0]
+	}
+
+	reg := registry.New()
+	prov := provider.NewManager(5*time.Second, "", "", nil, nil, 1<<20, 100)
+	srv := New(reg, prov, cache.New(time.Minute, 16), render.New(), testBaseURL, pw)
+
+	r := srv.SetupRoutes()
+	tpl := template.Must(template.New("").Funcs(template.FuncMap{
+		"safehtml": func(s string) template.HTML { return template.HTML(s) },
+	}).ParseFS(web.Templates, "templates/*.html"))
+	r.SetHTMLTemplate(tpl)
+
+	return r, reg
+}
+
+// postSite 调用 POST /api/sites，返回状态码与解析后的响应体。
+// 成功新建站点是 201；requestBaseURL 会读 req.Host，httptest 默认值是 example.com，
+// 这里显式对齐 testBaseURL 以免断言漂移。
+func postSite(t *testing.T, r *gin.Engine, body string, headers map[string]string) (int, map[string]any) {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/api/sites", strings.NewReader(body))
+	req.Host = "localhost:8080"
+	req.Header.Set("Content-Type", "application/json")
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	out := map[string]any{}
+	if data, err := io.ReadAll(w.Result().Body); err == nil && len(data) > 0 {
+		_ = json.Unmarshal(data, &out)
+	}
+	return w.Code, out
+}
+
+func TestIsValidAuthorityHost(t *testing.T) {
+	good := []string{
+		"localhost", "localhost:8080", "127.0.0.1:8099",
+		"git.example.com", "git.example.com:443", "sub.domain.co.uk",
+		"[::1]", "[::1]:8080", "[2001:db8::1]:9000",
+	}
+	bad := []string{
+		"",
+		`x"><img src=x onerror=alert(1)>`,
+		"attacker.com/evil",
+		"attacker.com/evil?next=1",
+		"evil.com#frag",
+		"user:pass@host",
+		"a b", "a\tb", "a\nb",
+		"-leading-dash.com", "trailing-dash-.com",
+		"host:port", "host:80x", "host:99999x",
+		"[::1", "::1]", "[not-an-ip]:80", "[::1]8080",
+		strings.Repeat("a", 254),
+	}
+	for _, h := range good {
+		if !isValidAuthorityHost(h) {
+			t.Errorf("isValidAuthorityHost(%q) = false, want true", h)
+		}
+	}
+	for _, h := range bad {
+		if isValidAuthorityHost(h) {
+			t.Errorf("isValidAuthorityHost(%q) = true, want false", h)
+		}
+	}
+}
+
+func TestIsHTTPSGitURL(t *testing.T) {
+	good := []string{
+		"https://github.com/fimreal/gitweb.git",
+		"https://github.com/fimreal/gitweb",
+		"http://git.example.com/team/repo.git",
+		"http://localhost:3000/user/repo.git",
+		"https://gitlab.com/group/sub/project.git",
+	}
+	bad := []string{
+		"",
+		"github.com/fimreal/gitweb.git",      // 无 scheme
+		"git@github.com:fimreal/gitweb.git",  // ssh 传输协议
+		"javascript:alert(1)",                // 伪协议
+		"data:text/html;base64,PHNjcmlwdD4=", // data URI
+		"https://github.com@evil.com/repo",   // userinfo 混淆：IdentifyProvider 会命中 github.com
+		"file:///etc/passwd",
+		"ssh://git@host/repo",
+		"https://",
+		"https://a b.com/repo",
+		"http://[::1/notclosed/repo",
+	}
+	// 注：host 是否可信（如 https://evil.com/x）不在本层断言——isHTTPSGitURL 只管
+	// URL 形态，host 白名单由 provider 的 SSRF 守卫负责。
+	for _, u := range good {
+		if !isHTTPSGitURL(u) {
+			t.Errorf("isHTTPSGitURL(%q) = false, want true", u)
+		}
+	}
+	for _, u := range bad {
+		if isHTTPSGitURL(u) {
+			t.Errorf("isHTTPSGitURL(%q) = true, want false", u)
+		}
+	}
+}
+
+func TestEffectiveRefRejectsInjectionAndTraversal(t *testing.T) {
+	cases := []struct {
+		query string
+		want  string
+	}{
+		{"", "main"},
+		{"?ref=develop", "develop"},
+		{"?ref=refs%2Fheads%2Fmain", "refs/heads/main"},
+		// 路径穿越：借同一 allow_hosts 白名单 host 读取其他仓库
+		{"?ref=../../other-owner/other-repo/main/x", "main"},
+		{"?ref=..%2F..%2Fother%2Frepo%2Fmain%2Fx", "main"},
+		// 查询串与片段注入：?ref=main&recursive=false 会改写上游请求
+		{"?ref=main%26recursive%3Dfalse", "main"},
+		{"?ref=main#frag", "main"},
+		// HTML 注入
+		{`?ref=%3Cimg%20src%3Dx%20onerror%3Dalert(1)%3E`, "main"},
+		{"?ref=%20%20", "main"}, // 纯空白经 TrimSpace 后为空，回落默认
+	}
+	for _, tc := range cases {
+		req := httptest.NewRequest(http.MethodGet, "/gitweb/"+tc.query, nil)
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = req
+		c.Params = gin.Params{{Key: "pathid", Value: "gitweb"}}
+		if got := effectiveRef(c, "main"); got != tc.want {
+			t.Errorf("effectiveRef(query %q) = %q, want %q", tc.query, got, tc.want)
+		}
+	}
+}
+
+// TestRegisterSiteRejectsMaliciousRef 锁住存储型 XSS 的服务端入口：
+// 恶意 ref 必须 400，且绝不能出现在 GET /api/sites 的回显里。
+func TestRegisterSiteRejectsMaliciousRef(t *testing.T) {
+	r, reg := newTestServer(t)
+
+	payloads := []string{
+		`<img src=x onerror=document.title="XSS-PWNED">`,
+		"</script><script>alert(1)</script>",
+		"../../other-owner/other-repo/main/x",
+	}
+	for _, p := range payloads {
+		code, _ := postSite(t, r, `{"git_url":"https://github.com/o/repo.git","ref":`+jsonString(p)+`}`, nil)
+		if code != http.StatusBadRequest {
+			t.Errorf("POST /api/sites with ref %q: status %d, want 400", p, code)
+		}
+	}
+	if n := len(reg.ListPublic()); n != 0 {
+		t.Fatalf("%d malicious sites were persisted, want 0", n)
+	}
+
+	// 正常 ref 必须仍然放行，避免校验过紧把功能打死。
+	legit := []string{"main", "feature/x", "v1.2.3", "3e2f1a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f"}
+	for i, p := range legit {
+		pathid := "ok" + string(rune('a'+i))
+		code, body := postSite(t, r,
+			`{"git_url":"https://github.com/o/repo.git","pathid":`+jsonString(pathid)+`,"ref":`+jsonString(p)+`}`, nil)
+		if code != http.StatusCreated {
+			t.Errorf("POST /api/sites with legit ref %q: status %d body %v, want 201", p, code, body)
+		}
+	}
+}
+
+func TestRegisterSiteRejectsMalformedGitURL(t *testing.T) {
+	r, _ := newTestServer(t)
+
+	bad := []string{
+		"git@github.com:fimreal/gitweb.git",
+		"javascript:alert(document.cookie)",
+		"https://github.com@evil.com/repo",
+		"not-a-url",
+	}
+	for _, u := range bad {
+		code, _ := postSite(t, r, `{"git_url":`+jsonString(u)+`,"ref":"main"}`, nil)
+		if code != http.StatusBadRequest {
+			t.Errorf("POST /api/sites with git_url %q: status %d, want 400", u, code)
+		}
+	}
+}
+
+// TestRegisterSiteURLIgnoresSpoofedForwardedHeaders 覆盖 requestBaseURL 的注入面：
+// 伪造的 X-Forwarded-Host / -Proto 不得进入响应 url 字段（前端会写进 innerHTML 与 href）。
+func TestRegisterSiteURLIgnoresSpoofedForwardedHeaders(t *testing.T) {
+	cases := []struct {
+		name    string
+		headers map[string]string
+	}{
+		{"html in forwarded host", map[string]string{"X-Forwarded-Host": `x"><img src=x onerror=alert(1)>`}},
+		{"javascript scheme", map[string]string{"X-Forwarded-Proto": "javascript"}},
+		{"path off forwarded host", map[string]string{"X-Forwarded-Host": "evil.com/attack"}},
+		{"userinfo confusion", map[string]string{"X-Forwarded-Host": "github.com@evil.com"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r, _ := newTestServer(t)
+			code, body := postSite(t, r,
+				`{"git_url":"https://github.com/o/repo.git","pathid":"p1","ref":"main"}`, tc.headers)
+			if code != http.StatusCreated {
+				t.Fatalf("status %d, want 201 (body %v)", code, body)
+			}
+			got, _ := body["url"].(string)
+			if got != testBaseURL+"/p1/" {
+				t.Errorf("url = %q, want %q — spoofed header leaked into the response", got, testBaseURL+"/p1/")
+			}
+		})
+	}
+}
+
+// jsonString 把任意字符串编码成 JSON 字面量，避免在测试里手工拼接转义。
+func jsonString(s string) string {
+	b, err := json.Marshal(s)
+	if err != nil {
+		panic(err)
+	}
+	return string(b)
+}

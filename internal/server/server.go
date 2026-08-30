@@ -9,7 +9,9 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
+	"net/url"
 	"path"
 	"strings"
 	"sync"
@@ -365,6 +367,13 @@ func (s *Server) handleRegisterSite(c *gin.Context) {
 		return
 	}
 
+	// IdentifyProvider 只做域名识别，对任意包含已知域名的字符串都会命中，
+	// 不能替代 URL 合法性校验。
+	if !isHTTPSGitURL(req.GitURL) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "git_url must be a plain http(s) URL with a host and no userinfo"})
+		return
+	}
+
 	providerType := s.provider.IdentifyProvider(req.GitURL)
 	if providerType == "" {
 		// 自托管实例探测失败常见原因：域名解析到私网 IP 被 SSRF 拦截。
@@ -512,9 +521,19 @@ func (s *Server) handleListBranches(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"branches": branches, "current": site.Ref})
 }
 
-// effectiveRef 从 ?ref= query 取临时分支，空则回退 site 默认 ref。
+// effectiveRef 解析 viewer 临时切换分支用的 ?ref= 覆盖值。
+//
+// 只接受 registry.IsValidRef 通过的 ref：该值会被 provider 用 fmt.Sprintf 裸拼进
+// 上游 URL（provider.go:180/283/350 —— filepath 走了 url.PathEscape，ref 没有），
+// 未校验时 ?ref=../../other-owner/other-repo/main/x 可借同一个 allow_hosts 白名单
+// host 越权读取其他仓库。非法值回落到站点自身配置的默认 ref，而不是报错——
+// 回落值是注册时已校验过的安全值。
 func effectiveRef(c *gin.Context, defaultRef string) string {
 	if r := strings.TrimSpace(c.Query("ref")); r != "" {
+		if !registry.IsValidRef(r) {
+			log.Printf("[ref-rejected] pathid=%s ref=%q", c.Param("pathid"), r)
+			return defaultRef
+		}
 		return r
 	}
 	return defaultRef
@@ -805,7 +824,11 @@ func decodeCookieAuth(v string, a *provider.Auth) {
 // 优先采用反代头（X-Forwarded-Proto / X-Forwarded-Host），否则回退到请求本身的
 // scheme + Host 头。这样从 192.168.x.x、localhost 或公网域名访问时，返回的链接
 // host 都与用户实际访问的一致，而非配置里固定的 baseURL。
-// s.baseURL 仅在请求头缺失的极端情况下兜底。
+//
+// 反代头不可信：该返回值会进入 POST /api/sites 的 url 字段，再由前端写进 innerHTML
+// 与 href 属性。因此 scheme 只允许 http/https，host 必须通过 isValidAuthorityHost；
+// 任一不合法即整体回落到配置的 baseURL。
+// s.baseURL 仅在请求头缺失或不合法时兜底。
 func (s *Server) requestBaseURL(c *gin.Context) string {
 	scheme := c.GetHeader("X-Forwarded-Proto")
 	if scheme == "" {
@@ -815,14 +838,94 @@ func (s *Server) requestBaseURL(c *gin.Context) string {
 			scheme = "http"
 		}
 	}
+	if scheme != "http" && scheme != "https" {
+		return strings.TrimRight(s.baseURL, "/")
+	}
 	host := c.GetHeader("X-Forwarded-Host")
 	if host == "" {
 		host = c.Request.Host
 	}
-	if host == "" {
+	if !isValidAuthorityHost(host) {
 		return strings.TrimRight(s.baseURL, "/")
 	}
 	return scheme + "://" + host
+}
+
+// isHTTPSGitURL 校验注册提交的 git_url：必须是可解析的 http/https URL、host 合法、
+// 不含 userinfo 与空白。拒绝 userinfo 是必要的——https://github.com@evil.com/ 会让
+// IdentifyProvider 因命中 "github.com" 而识别成功，实际请求却发往 evil.com。
+func isHTTPSGitURL(raw string) bool {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || len(raw) > 2048 || strings.ContainsAny(raw, " \t\r\n") {
+		return false
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return false
+	}
+	if u.User != nil || u.Host == "" {
+		return false
+	}
+	return isValidAuthorityHost(u.Host)
+}
+
+// isValidAuthorityHost 判定 host 是否为合法 URL authority：hostname[:port] 或
+// IPv6 字面量 [::1][:port]。采用字符白名单而非 url.Parse，因为 Go 的 url.Parse
+// 并不拒绝 host 中的 " 与 > 等字符，挡不住 HTML 元字符注入。
+func isValidAuthorityHost(host string) bool {
+	if host == "" || len(host) > 253 {
+		return false
+	}
+	name, port := host, ""
+	if strings.HasPrefix(host, "[") {
+		end := strings.Index(host, "]")
+		if end < 0 || net.ParseIP(host[1:end]) == nil {
+			return false
+		}
+		name = host[:end+1]
+		if rest := host[end+1:]; rest != "" {
+			if !strings.HasPrefix(rest, ":") {
+				return false
+			}
+			port = rest[1:]
+		}
+	} else if i := strings.Index(host, ":"); i >= 0 && !strings.Contains(host[i+1:], ":") {
+		name, port = host[:i], host[i+1:]
+	}
+	if name == "" {
+		return false
+	}
+	bracketed := strings.HasPrefix(host, "[")
+	for _, r := range name {
+		alnum := (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')
+		if alnum || r == '-' || r == '.' || r == '_' {
+			continue
+		}
+		// ':' '[' ']' 仅属于括号形式的 IPv6 字面量，挡住 "::1]" 这类畸形值。
+		if !bracketed || (r != ':' && r != '[' && r != ']') {
+			return false
+		}
+	}
+	// 每个 DNS label 都不得以 '-' 开头或结尾。
+	if !bracketed {
+		for _, label := range strings.Split(name, ".") {
+			if label == "" {
+				return false
+			}
+			if label[0] == '-' || label[len(label)-1] == '-' {
+				return false
+			}
+		}
+	}
+	for _, r := range port {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // repoNameFromURL 从 git URL 解析出 owner/repo 作为显示名。

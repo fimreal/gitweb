@@ -114,6 +114,61 @@ func TestIsValidPathID(t *testing.T) {
 	}
 }
 
+func TestIsValidRef(t *testing.T) {
+	good := []string{
+		"main", "master", "HEAD", "develop",
+		"feature/x", "release/2026/08", "refs/heads/main", "refs/tags/v1.2.3",
+		"v1.2.3", "v1.0.0-rc.1", "my_branch", "my-branch", "build-32",
+		"3e2f1a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f", // 完整 commit SHA
+		"3e2f1a8", // 缩写 SHA
+	}
+	bad := []string{
+		"",
+		`<img src=x onerror=document.title="XSS-PWNED">`, // 实测过的注册 payload
+		"<script>alert(1)</script>",
+		"a b", "a\tb", "a\nb",
+		"a~b", "a^b", "a:b", "a?b", "a*b", "a[b", `a\b`, "a@{b", "a'b", `a"b`, "a&b",
+		"a..b",
+		"/leading", "trailing/", "double//slash",
+		".hidden", "sub/.hidden", "trailing.", "sub/trailing.",
+		"a.lock", "refs/heads/x.lock",
+		"中文",
+		"ref/" + strings.Repeat("a", 300),
+	}
+	for _, ref := range good {
+		if !IsValidRef(ref) {
+			t.Errorf("IsValidRef(%q) = false, want true", ref)
+		}
+	}
+	for _, ref := range bad {
+		if IsValidRef(ref) {
+			t.Errorf("IsValidRef(%q) = true, want false", ref)
+		}
+	}
+}
+
+// TestRegisterRejectsMaliciousRef 是 /api/sites 存储型 XSS 的回归防线：
+// ref 曾经未经任何校验直接落库，并经 GET /api/sites 回显到前端 innerHTML。
+func TestRegisterRejectsMaliciousRef(t *testing.T) {
+	r := New()
+	payload := `<img src=x onerror=alert(1)>`
+	if _, err := r.Register("https://github.com/o/repo", "evil", payload, "github", nil, false); err == nil {
+		t.Fatalf("Register accepted malicious ref %q", payload)
+	}
+	if got := r.ListPublic(); len(got) != 0 {
+		t.Fatalf("malicious site was stored; ListPublic returned %d", len(got))
+	}
+
+	// 空 ref 仍应回退到 main，而不是被当作非法值拒绝。
+	site, err := r.Register("https://github.com/o/repo", "ok", "", "github", nil, false)
+	if err != nil {
+		t.Fatalf("Register with empty ref: %v", err)
+	}
+	if site.Ref != "main" {
+		t.Errorf("empty ref defaulted to %q, want %q", site.Ref, "main")
+	}
+}
+
 func TestHiddenNotInListPublic(t *testing.T) {
 	r := New()
 	if _, err := r.Register("https://github.com/o/pub", "pub", "main", "github", nil, false); err != nil {

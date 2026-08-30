@@ -28,6 +28,29 @@
         });
     }
 
+    // =========================================================
+    //  共享工具：HTML 转义 + 站点卡片渲染
+    //  站点字段（git_url / ref）来自公开注册接口，写入 innerHTML 前必须转义。
+    //  显式替换而非 div.textContent 技巧：后者不转义单引号，无法覆盖属性上下文。
+    // =========================================================
+    function escapeHtml(s) {
+        return String(s == null ? '' : s)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    function siteCard(s) {
+        return '<a class="site-card" href="/' + escapeHtml(s.pathid) + '/" target="_blank" rel="noopener">'
+            + '<div class="site-card-head"><span class="pathid">' + escapeHtml(s.pathid) + '</span>'
+            + '<svg class="open-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17L17 7"/><path d="M8 7h9v9"/></svg></div>'
+            + '<span class="git-url">' + escapeHtml(s.git_url) + '</span>'
+            + '<span class="ref-chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="6" r="2.5"/><path d="M6 8.5v7"/><path d="M6 12h6a3 3 0 0 0 3-3V8.5"/></svg>'
+            + escapeHtml(s.ref) + '</span></a>';
+    }
+
     function initLang() {
         applyLang(currentLang);
 
@@ -102,8 +125,8 @@
                     resultDiv.className = 'success';
                     resultDiv.innerHTML = `
                         <p><strong>${currentLang === 'zh' ? '✓ 注册成功！' : '✓ Registration successful!'}</strong></p>
-                        <p><strong>Path ID:</strong> <a href="/${result.pathid}/" target="_blank">${result.pathid}</a></p>
-                        <p><strong>URL:</strong> <a href="${result.url}" target="_blank">${result.url}</a></p>
+                        <p><strong>Path ID:</strong> <a href="/${escapeHtml(result.pathid)}/" target="_blank">${escapeHtml(result.pathid)}</a></p>
+                        <p><strong>URL:</strong> <a href="${escapeHtml(result.url)}" target="_blank">${escapeHtml(result.url)}</a></p>
                     `;
                     document.getElementById('git_url').value = '';
                     document.getElementById('pathid').value = '';
@@ -111,7 +134,7 @@
                     toast.success(currentLang === 'zh' ? '注册成功' : 'Registration successful');
                 } else {
                     resultDiv.className = 'error';
-                    resultDiv.innerHTML = `<strong>${currentLang === 'zh' ? '✗ 错误' : '✗ Error'}:</strong> ${result.error}`;
+                    resultDiv.innerHTML = `<strong>${currentLang === 'zh' ? '✗ 错误' : '✗ Error'}:</strong> ${escapeHtml(result.error)}`;
                     toast.error((currentLang === 'zh' ? '注册失败' : 'Registration failed') + ': ' + (result.error || response.status));
                 }
 
@@ -119,7 +142,7 @@
             } catch (error) {
                 const resultDiv = document.getElementById('result');
                 resultDiv.className = 'error';
-                resultDiv.innerHTML = `<strong>${currentLang === 'zh' ? '✗ 网络错误' : '✗ Network error'}:</strong> ${error.message}`;
+                resultDiv.innerHTML = `<strong>${currentLang === 'zh' ? '✗ 网络错误' : '✗ Network error'}:</strong> ${escapeHtml(error.message)}`;
                 resultDiv.style.display = 'block';
                 toast.error((currentLang === 'zh' ? '网络错误' : 'Network error') + ': ' + error.message);
             }
@@ -143,19 +166,7 @@
 
             const sitesGrid = document.getElementById('sites-list');
             const sitesTitle = document.getElementById('sites-title');
-            sitesGrid.innerHTML = recent.map(site => `
-                <a class="site-card" href="/${site.pathid}/" target="_blank" rel="noopener">
-                    <div class="site-card-head">
-                        <span class="pathid">${site.pathid}</span>
-                        <svg class="open-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17L17 7"/><path d="M8 7h9v9"/></svg>
-                    </div>
-                    <span class="git-url">${site.git_url}</span>
-                    <span class="ref-chip">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="6" r="2.5"/><path d="M6 8.5v7"/><path d="M6 12h6a3 3 0 0 0 3-3V8.5"/></svg>
-                        ${site.ref}
-                    </span>
-                </a>
-            `).join('');
+            sitesGrid.innerHTML = recent.map(siteCard).join('');
 
             sitesGrid.style.display = 'grid';
             if (sitesTitle) sitesTitle.style.display = 'block';
@@ -185,21 +196,6 @@
         let allSites = [];
         let filtered = [];
         let page = 0, totalPages = 0;
-
-        function escapeHtml(s) {
-            var d = document.createElement('div');
-            d.textContent = s == null ? '' : String(s);
-            return d.innerHTML;
-        }
-
-        function siteCard(s) {
-            return '<a class="site-card" href="/' + escapeHtml(s.pathid) + '/" target="_blank" rel="noopener">'
-                + '<div class="site-card-head"><span class="pathid">' + escapeHtml(s.pathid) + '</span>'
-                + '<svg class="open-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17L17 7"/><path d="M8 7h9v9"/></svg></div>'
-                + '<span class="git-url">' + escapeHtml(s.git_url) + '</span>'
-                + '<span class="ref-chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="6" r="2.5"/><path d="M6 8.5v7"/><path d="M6 12h6a3 3 0 0 0 3-3V8.5"/></svg>'
-                + escapeHtml(s.ref) + '</span></a>';
-        }
 
         function filter() {
             var q = (filterInp.value || '').trim().toLowerCase();

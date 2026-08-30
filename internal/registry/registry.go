@@ -174,6 +174,8 @@ func (r *Registry) Register(gitURL, pathID, ref string, providerType string, aut
 
 	if ref == "" {
 		ref = "main"
+	} else if !IsValidRef(ref) {
+		return nil, errors.New("invalid ref: must be 1-200 chars of [a-zA-Z0-9._/-], no \"..\", no leading/trailing \"/\" or \".\" in each segment, no trailing \".lock\"")
 	}
 
 	if pathID == "" {
@@ -298,6 +300,45 @@ func IsValidPathID(pathID string) bool {
 	for _, r := range pathID {
 		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
 			(r >= '0' && r <= '9') || r == '-' || r == '_') {
+			return false
+		}
+	}
+	return true
+}
+
+// refMaxLen 是 ref 允许的最大长度。真实分支名与标签名远小于此值，
+// 上限用于挡住把整段 HTML 当作 ref 提交的请求。
+const refMaxLen = 200
+
+// IsValidRef 校验 git ref（分支名 / 标签名 / 完整或缩写 commit SHA）。
+//
+// 规则取自 git check-ref-format 的保守子集，并额外收紧为字符白名单：ref 既会被
+// 拼进上游 Git API 的 URL，又会经 /api/sites 回显到前端 DOM，而站点注册是公开的，
+// 因此必须排除 < > " ' & 空格 等 HTML 与 URL 元字符，而不是仅依赖调用方转义。
+func IsValidRef(ref string) bool {
+	if ref == "" || len(ref) > refMaxLen {
+		return false
+	}
+	for _, r := range ref {
+		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
+			(r >= '0' && r <= '9') || r == '.' || r == '-' || r == '_' || r == '/') {
+			return false
+		}
+	}
+	// check-ref-format: 不允许 ".." 段分隔符。
+	if strings.Contains(ref, "..") {
+		return false
+	}
+	// check-ref-format: 首尾不得为 "/"，且不得出现连续 "/"。
+	if strings.HasPrefix(ref, "/") || strings.HasSuffix(ref, "/") {
+		return false
+	}
+	// check-ref-format: 不得以 ".lock" 结尾；每个 "/" 分隔段不得以 "." 开头或结尾。
+	if strings.HasSuffix(ref, ".lock") {
+		return false
+	}
+	for _, seg := range strings.Split(ref, "/") {
+		if seg == "" || strings.HasPrefix(seg, ".") || strings.HasSuffix(seg, ".") {
 			return false
 		}
 	}
