@@ -31,6 +31,10 @@ type providerBase struct {
 	allow   []string
 	deny    []string
 	maxSize int64
+	// identity 强制上游不做传输编码。Go 的 client 默认带 Accept-Encoding: gzip，
+	// CDN（如 raw.githubusercontent.com）于是改用 chunked 且**不回 content-length** ——
+	// 流式进度条的分母当场消失。实测同一文件：带 gzip 时长度未知，identity 时精确。
+	identity bool
 }
 
 // checkSSRF 校验目标 URL 的 host 是否允许访问。
@@ -55,6 +59,49 @@ func (b providerBase) readBody(resp *http.Response) ([]byte, error) {
 		return data, nil
 	}
 	return io.ReadAll(resp.Body)
+}
+
+// mapStatus 把上游状态码翻译成包内哨兵错误。缓冲版 Fetch 与流式版 FetchStream 必须共用
+// 这一份映射：两条路径对同一个 404 给出不同语义，前端的凭据弹窗就会时灵时不灵。
+func mapStatus(resp *http.Response, providerName string, auth *Auth) error {
+	switch resp.StatusCode {
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return ErrAuthRequired
+	case http.StatusNotFound:
+		if !hasAuth(auth) {
+			return ErrAuthRequired
+		}
+		return ErrNotFound
+	case http.StatusOK:
+		return nil
+	}
+	return fmt.Errorf("%s returned %d", providerName, resp.StatusCode)
+}
+
+// open 发请求并完成状态码判定，把**尚未读取**的响应体交给调用方：缓冲版在它上面调
+// readBody，流式版直接把 Body 接走边收边转发。非 200 时 open 已负责 Close。
+// setAuth 承载各 provider 的凭据头差异。
+func (b providerBase) open(ctx context.Context, client *http.Client, providerName, rawURL string, auth *Auth, setAuth func(*http.Request)) (*http.Response, error) {
+	if err := b.checkSSRF(rawURL); err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, "GET", rawURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	if b.identity {
+		req.Header.Set("Accept-Encoding", "identity")
+	}
+	setAuth(req)
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	if err := mapStatus(resp, providerName, auth); err != nil {
+		resp.Body.Close()
+		return nil, err
+	}
+	return resp, nil
 }
 
 type Auth struct {
@@ -165,12 +212,100 @@ func (m *Manager) Fetch(ctx context.Context, providerType, gitURL, ref, filepath
 	return v.([]byte), nil
 }
 
+// Stream 是一次尚未读取的上游响应。Body 必须由调用方 Close。
+type Stream struct {
+	Body io.ReadCloser
+	// ContentLength 是上游声明的字节数；未知时为 -1（net/http 的约定），不是 0。
+	ContentLength int64
+}
+
+// FetchStream 与 Fetch 共用同一套定位、SSRF、限流与状态码映射，区别只在于不把响应读进
+// 内存 —— 需要边收边把真实字节进度报给浏览器时走这条。
+// 刻意绕开 singleflight：一份 Body 只能被一个读者消费，合流会把空 body 交给后来者。
+func (m *Manager) FetchStream(ctx context.Context, providerType, gitURL, ref, filepath string, auth *Auth) (*Stream, error) {
+	// 先检查 host 限流
+	host := extractHost(gitURL)
+	if host != "" {
+		limiter := m.getLimiter(host)
+		if !limiter.Allow() {
+			return nil, ErrRateLimited
+		}
+	}
+
+	base := providerBase{allow: m.allow, deny: m.deny, maxSize: m.maxSize, identity: true}
+	var (
+		resp *http.Response
+		err  error
+	)
+	switch providerType {
+	case "github":
+		resp, err = (&GitHubProvider{client: m.client, providerBase: base}).openFetch(ctx, gitURL, ref, filepath, auth)
+	case "gitlab":
+		resp, err = (&GitLabProvider{client: m.client, providerBase: base}).openFetch(ctx, gitURL, ref, filepath, auth)
+	case "gitea":
+		resp, err = (&GiteaProvider{client: m.client, providerBase: base}).openFetch(ctx, gitURL, ref, filepath, auth)
+	default:
+		return nil, fmt.Errorf("unsupported provider type: %s", providerType)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	// 缓冲版是读满 maxSize 才报错；流式版把响应头先发出去之后就再也改不了状态码，
+	// 所以上游既然报了长度，就在写头之前拦下来，让 server 还能正常回 413。
+	if base.maxSize > 0 && resp.ContentLength > base.maxSize {
+		resp.Body.Close()
+		return nil, ErrTooLarge
+	}
+	// 我们手工带的 Accept-Encoding: identity 不在 Go 的透明解压保护范围内：
+	// 上游若无视它仍回压缩字节，原样泵给浏览器就是一份静默损坏的文件。宁可报错。
+	if enc := resp.Header.Get("Content-Encoding"); enc != "" {
+		resp.Body.Close()
+		return nil, fmt.Errorf("%s streamed with Content-Encoding=%s, refusing to relay compressed bytes", providerType, enc)
+	}
+
+	var body io.ReadCloser = resp.Body
+	// 缓冲版由 readBody 一次性卡住 maxSize；流式版把字节直接泵给客户端，没有这道闸门的
+	// 话，一个谎报或干脆不给 Content-Length 的上游就能借本服务无限外发。
+	if base.maxSize > 0 {
+		body = &maxSizeReader{ReadCloser: resp.Body, limit: base.maxSize}
+	}
+	return &Stream{Body: body, ContentLength: resp.ContentLength}, nil
+}
+
+// maxSizeReader 在流式路径上复刻 maxSize 闸门：累计放行超过上限后，后续读一律
+// ErrTooLarge。调用方据此停止转发，并且绝不写缓存。
+type maxSizeReader struct {
+	io.ReadCloser
+	limit int64
+	read  int64
+}
+
+func (r *maxSizeReader) Read(p []byte) (int, error) {
+	if r.read > r.limit {
+		return 0, ErrTooLarge
+	}
+	n, err := r.ReadCloser.Read(p)
+	r.read += int64(n)
+	return n, err
+}
+
 type GitHubProvider struct {
 	client *http.Client
 	providerBase
 }
 
 func (p *GitHubProvider) Fetch(ctx context.Context, gitURL, ref, filepath string, auth *Auth) ([]byte, error) {
+	resp, err := p.openFetch(ctx, gitURL, ref, filepath, auth)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	return p.readBody(resp)
+}
+
+// openFetch 定位上游并取回未读响应体。URL 构造与凭据头是 provider 差异，其余共用 open。
+func (p *GitHubProvider) openFetch(ctx context.Context, gitURL, ref, filepath string, auth *Auth) (*http.Response, error) {
 	owner, repo, err := parseGitHubURL(gitURL)
 	if err != nil {
 		return nil, err
@@ -178,40 +313,11 @@ func (p *GitHubProvider) Fetch(ctx context.Context, gitURL, ref, filepath string
 
 	// raw.githubusercontent.com 始终走 https，与仓库所在 host 的 scheme 无关
 	rawURL := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s/%s", owner, repo, ref, filepath)
-	if err := p.checkSSRF(rawURL); err != nil {
-		return nil, err
-	}
-
-	req, err := http.NewRequestWithContext(ctx, "GET", rawURL, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	if auth != nil && auth.Token != "" {
-		req.Header.Set("Authorization", "token "+auth.Token)
-	}
-
-	resp, err := p.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == 401 || resp.StatusCode == 403 {
-		return nil, ErrAuthRequired
-	}
-	if resp.StatusCode == 404 {
-		if !hasAuth(auth) {
-			// 无凭据时 GitHub 对私有仓库返回 404（不泄露存在性），视为需要鉴权
-			return nil, ErrAuthRequired
+	return p.providerBase.open(ctx, p.client, "github", rawURL, auth, func(req *http.Request) {
+		if auth != nil && auth.Token != "" {
+			req.Header.Set("Authorization", "token "+auth.Token)
 		}
-		return nil, ErrNotFound
-	}
-	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("github returned %d", resp.StatusCode)
-	}
-
-	return p.readBody(resp)
+	})
 }
 
 func parseGitHubURL(gitURL string) (owner, repo string, err error) {
@@ -273,6 +379,15 @@ type GitLabProvider struct {
 }
 
 func (p *GitLabProvider) Fetch(ctx context.Context, gitURL, ref, filepath string, auth *Auth) ([]byte, error) {
+	resp, err := p.openFetch(ctx, gitURL, ref, filepath, auth)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	return p.readBody(resp)
+}
+
+func (p *GitLabProvider) openFetch(ctx context.Context, gitURL, ref, filepath string, auth *Auth) (*http.Response, error) {
 	scheme, host, projectPath, err := parseGitLabURL(gitURL)
 	if err != nil {
 		return nil, err
@@ -282,39 +397,11 @@ func (p *GitLabProvider) Fetch(ctx context.Context, gitURL, ref, filepath string
 	encodedProject := url.PathEscape(projectPath)
 	apiURL := fmt.Sprintf("%s://%s/api/v4/projects/%s/repository/files/%s/raw?ref=%s",
 		scheme, host, encodedProject, encodedPath, url.QueryEscape(ref))
-	if err := p.checkSSRF(apiURL); err != nil {
-		return nil, err
-	}
-
-	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	if auth != nil && auth.Token != "" {
-		req.Header.Set("PRIVATE-TOKEN", auth.Token)
-	}
-
-	resp, err := p.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == 401 || resp.StatusCode == 403 {
-		return nil, ErrAuthRequired
-	}
-	if resp.StatusCode == 404 {
-		if !hasAuth(auth) {
-			return nil, ErrAuthRequired
+	return p.providerBase.open(ctx, p.client, "gitlab", apiURL, auth, func(req *http.Request) {
+		if auth != nil && auth.Token != "" {
+			req.Header.Set("PRIVATE-TOKEN", auth.Token)
 		}
-		return nil, ErrNotFound
-	}
-	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("gitlab returned %d", resp.StatusCode)
-	}
-
-	return p.readBody(resp)
+	})
 }
 
 func parseGitLabURL(gitURL string) (scheme, host, projectPath string, err error) {
@@ -342,47 +429,28 @@ type GiteaProvider struct {
 }
 
 func (p *GiteaProvider) Fetch(ctx context.Context, gitURL, ref, filepath string, auth *Auth) ([]byte, error) {
+	resp, err := p.openFetch(ctx, gitURL, ref, filepath, auth)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	return p.readBody(resp)
+}
+
+func (p *GiteaProvider) openFetch(ctx context.Context, gitURL, ref, filepath string, auth *Auth) (*http.Response, error) {
 	scheme, host, owner, repo, err := parseGiteaURL(gitURL)
 	if err != nil {
 		return nil, err
 	}
 
 	rawURL := fmt.Sprintf("%s://%s/%s/%s/raw/branch/%s/%s", scheme, host, owner, repo, ref, filepath)
-	if err := p.checkSSRF(rawURL); err != nil {
-		return nil, err
-	}
-
-	req, err := http.NewRequestWithContext(ctx, "GET", rawURL, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	if auth != nil && auth.Token != "" {
-		req.Header.Set("Authorization", "token "+auth.Token)
-	} else if auth != nil && auth.Username != "" {
-		req.SetBasicAuth(auth.Username, auth.Password)
-	}
-
-	resp, err := p.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == 401 || resp.StatusCode == 403 {
-		return nil, ErrAuthRequired
-	}
-	if resp.StatusCode == 404 {
-		if !hasAuth(auth) {
-			return nil, ErrAuthRequired
+	return p.providerBase.open(ctx, p.client, "gitea", rawURL, auth, func(req *http.Request) {
+		if auth != nil && auth.Token != "" {
+			req.Header.Set("Authorization", "token "+auth.Token)
+		} else if auth != nil && auth.Username != "" {
+			req.SetBasicAuth(auth.Username, auth.Password)
 		}
-		return nil, ErrNotFound
-	}
-	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("gitea returned %d", resp.StatusCode)
-	}
-
-	return p.readBody(resp)
+	})
 }
 
 func parseGiteaURL(gitURL string) (scheme, host, owner, repo string, err error) {
