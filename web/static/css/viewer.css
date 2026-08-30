@@ -807,14 +807,13 @@ body {
 }
 .floating-tree-window.docked .floating-tree-titlebar { cursor: grab; }
 .floating-tree-window.docked .min-dock { display: none; }
-/* 停靠态标题栏：与 viewer-header 同高（--header-h）对齐，同色毛玻璃贯通 */
+/* 停靠态标题栏：只换背景，高度沿用基础规则的天然值（约 44px）。
+   曾经强制 height: var(--header-h) 想与页头等高，但侧栏本就起于页头下方，
+   两条等高的横带会叠成一条 126px 的重带；等宽不等高才和浮动态一致。 */
 .floating-tree-window.docked .floating-tree-titlebar {
-    height: var(--header-h, 52px);
-    padding: 0 10px 0 16px;
     background: var(--glass-bg);
     -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(160%);
     backdrop-filter: blur(var(--glass-blur)) saturate(160%);
-    border-bottom: 1px solid var(--border);
 }
 .floating-tree-window.docked .floating-tree-titlebar h3 { font-size: 13px; }
 
@@ -841,6 +840,14 @@ body {
     border-radius: 0;
     border-right: none;
     border-left: 1px solid var(--border);
+}
+/* 页头自动隐藏时侧栏跟着顶到视口上沿：head-hidden 已把 header 移走，
+   侧栏若仍停在 --header-h 处，上方就空出一条等高的死带。 */
+:root.head-hidden .floating-tree-window.docked-left,
+:root.head-hidden .floating-tree-window.docked-right {
+    top: 0 !important;
+    height: 100vh !important;
+    height: 100dvh !important;
 }
 /* 底停靠：贴底部全宽，上侧可拖拽调高 */
 .floating-tree-window.docked-bottom {

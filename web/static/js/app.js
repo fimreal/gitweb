@@ -53,7 +53,10 @@
 
         // title 提示翻译（如高级选项 summary 只剩图标，文字走 title）
         document.querySelectorAll('[data-en-title][data-zh-title]').forEach(el => {
-            el.title = lang === 'zh' ? el.getAttribute('data-zh-title') : el.getAttribute('data-en-title');
+            const text = lang === 'zh' ? el.getAttribute('data-zh-title') : el.getAttribute('data-en-title');
+            el.title = text;
+            // 纯图标按钮的可访问名来自 aria-label，不同步会让读屏停在初始语言上
+            if (el.hasAttribute('aria-label')) el.setAttribute('aria-label', text);
         });
 
         const mainInput = document.getElementById('git_url');
