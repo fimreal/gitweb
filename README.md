@@ -14,7 +14,7 @@ Transform git repositories into browsable web pages.
 - **File tree**: Floating, draggable file browser to navigate the repo
 - **Single binary**: Web assets (templates, CSS, JS) are embedded into the Go binary via `//go:embed`. The released tarball and Docker image contain only the binary — no external `web/` directory is needed.
 - **In-memory caching**: LRU + TTL cache; fetched file contents are cleared on restart
-- **Site registry persistence**: Sites added at runtime survive restarts via a JSON state file (`-state` / `GITWEB_STATE`). It stores routing data only — path ID, git URL, ref, provider, view count, hidden flag. Credentials are never written to disk. See [Site state file](#site-state-file).
+- **Site registry persistence**: Sites added at runtime survive restarts via a JSON state file (config `state_file`, overridable by `-state` / `GITWEB_STATE`). It stores routing data only — path ID, git URL, ref, provider, view count, hidden flag. Credentials are never written to disk. See [Site state file](#site-state-file).
 - **Security**: SSRF protection (private/loopback hosts blocked), file-size limits via streaming, strict CSP, sandboxed HTML rendering
 - **Responsive UI**: Dark mode and bilingual (EN/中文)
 
