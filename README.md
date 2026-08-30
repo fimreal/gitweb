@@ -13,7 +13,8 @@ Transform git repositories into browsable web pages.
 - **Optional site password**: Set a password in config / via `-password` flag to require login before any page can be accessed. Not set = public (default).
 - **File tree**: Floating, draggable file browser to navigate the repo
 - **Single binary**: Web assets (templates, CSS, JS) are embedded into the Go binary via `//go:embed`. The released tarball and Docker image contain only the binary — no external `web/` directory is needed.
-- **In-memory caching**: LRU + TTL cache; restart clears everything (stateless)
+- **In-memory caching**: LRU + TTL cache; fetched file contents are cleared on restart
+- **Site registry persistence**: Sites added at runtime survive restarts via a JSON state file (`-state` / `GITWEB_STATE`). It stores routing data only — path ID, git URL, ref, provider, view count, hidden flag. Credentials are never written to disk. See [Site state file](#site-state-file).
 - **Security**: SSRF protection (private/loopback hosts blocked), file-size limits via streaming, strict CSP, sandboxed HTML rendering
 - **Responsive UI**: Dark mode and bilingual (EN/中文)
 
@@ -36,21 +37,28 @@ go build -o gitweb ./cmd/gitweb
 
 # Require a password to access the site
 ./gitweb --password your-secret
+
+# Persist the site registry to an explicit path
+# (default: ./gitweb.state.json, relative to the process working directory)
+./gitweb --state /var/lib/gitweb/gitweb.state.json
 ```
 
 ### Run with Docker
 
 ```bash
 # Using the pre-built image
+# The named volume keeps the site registry (/data/gitweb.state.json) across restarts.
+# Without it, sites added at runtime are lost when the container is recreated.
 docker run -d -p 8080:8080 \
   -v $(pwd)/config.yaml:/app/config.yaml:ro \
+  -v gitweb-state:/data \
   --name gitweb \
   ${DOCKERHUB_USERNAME}/gitweb:latest \
   /app/gitweb --config /app/config.yaml
 
 # Or build locally
 docker build -t gitweb .
-docker run -d -p 8080:8080 gitweb
+docker run -d -p 8080:8080 -v gitweb-state:/data gitweb
 ```
 
 Visit `http://localhost:8080` to register repositories.
@@ -93,6 +101,35 @@ sites:
 > This is a **public service**: there is no registration auth. Anyone can register a
 > repository. Rely on SSRF protection, file-size limits, and cache/timeout caps to
 > bound abuse.
+
+### Site state file
+
+Sites added at runtime are persisted to one JSON file so they survive restarts.
+
+- **Path**: `-state /path/to/state.json`, falling back to `$GITWEB_STATE`, then
+  `./gitweb.state.json`. An empty value at either level (`-state ""` or `GITWEB_STATE=""`)
+  runs memory-only — every runtime-registered site is then lost on restart.
+- **Priority**: explicit `-state` > `GITWEB_STATE` > built-in default.
+- **Contents**: path ID, git URL, ref, provider, created time, view count, hidden flag.
+  **Never credentials** — tokens and passwords stay in the browser (sessionStorage).
+- **Relation to `sites:` in config**: the state file wins. Preset sites are seeded only when
+  their path ID / git URL is not already registered, so editing `config.yaml` does not reset
+  a live registry.
+
+Two operational traps:
+
+- The default `./gitweb.state.json` resolves against the **process working directory**, not the
+  directory holding the binary. Under systemd or a supervisor that is often not where you expect,
+  and the service user may have no write permission there. Pass an absolute path in deployments;
+  the resolved absolute path and the effective uid are printed on startup.
+- A state file must have **one writer**. Each save rewrites the whole file from that process's
+  in-memory registry, so two instances sharing one path erase each other's sites. Give every
+  instance its own path.
+
+Writes are atomic (temp file in the same directory + rename, mode `0600`). View counts are
+debounced — flushed every 5s and once more on shutdown — while registration, deletion and
+visibility changes are written immediately. If the target directory is not writable, gitweb exits
+at startup instead of serving with persistence that could never succeed.
 
 ## API
 

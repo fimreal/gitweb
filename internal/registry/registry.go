@@ -47,11 +47,15 @@ func New() *Registry {
 	}
 }
 
-// EnablePersistence 加载 path 处的 state 文件到内存（保留各站点 CreatedAt），
+// EnablePersistence 校验 path 所在目录可写、加载 state 文件到内存（保留各站点 CreatedAt），
 // 并挂上 store，使后续 Register/Remove 原子落盘。文件不存在视为空状态（非错误）。
 // 应在启动时、注册 config 预置站点之前调用一次。
+// 目录不可写会直接返回错误：调用方据此拒绝启动，而不是带着一个永远写不进去的 store 继续服务。
 func (r *Registry) EnablePersistence(path string) error {
 	st := newFileStore(path)
+	if err := st.Probe(); err != nil {
+		return err
+	}
 	records, err := st.Load()
 	if err != nil {
 		return err

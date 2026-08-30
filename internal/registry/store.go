@@ -41,6 +41,30 @@ func newFileStore(path string) *fileStore {
 	return &fileStore{path: path}
 }
 
+// Probe 验证 state 文件所在目录确实可写：用与 Save 完全相同的路径建一个临时文件再删掉。
+// 必须在启动时调用一次。不可写是配置错误而不是偶发 IO 错：Save 失败只记日志（见 Register），
+// 少了这道探针，进程会以「注册站点全部成功、却一个都存不下来」的状态一直跑。
+func (f *fileStore) Probe() error {
+	tmp, err := os.CreateTemp(filepath.Dir(f.path), ".gitweb.state.*.tmp")
+	if err != nil {
+		return fmt.Errorf("state dir %s is not writable: %w", f.absDir(), err)
+	}
+	name := tmp.Name()
+	tmp.Close()
+	os.Remove(name)
+	return nil
+}
+
+// absDir 返回目录的绝对形式，把进程当前的工作目录一并暴露到错误信息里
+// ——state 路径允许是相对值，只印相对路径查不出它究竟落在哪。
+func (f *fileStore) absDir() string {
+	dir := filepath.Dir(f.path)
+	if abs, err := filepath.Abs(dir); err == nil {
+		return abs
+	}
+	return dir
+}
+
 // Load 读取 state 文件。文件不存在时返回 nil, nil（非错误）。
 func (f *fileStore) Load() ([]stateRecord, error) {
 	data, err := os.ReadFile(f.path)

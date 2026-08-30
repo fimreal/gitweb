@@ -1,6 +1,8 @@
 package registry
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -187,5 +189,73 @@ func TestHiddenNotInListPublic(t *testing.T) {
 	// 隐藏站点仍可直链 Get
 	if _, err := r.Get("secret"); err != nil {
 		t.Errorf("Get(secret): %v", err)
+	}
+}
+
+func TestEnablePersistenceRejectsUnwritableDir(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root 无视目录写权限，探针无法被不可写目录触发")
+	}
+	dir := t.TempDir()
+	ro := filepath.Join(dir, "readonly")
+	if err := os.Mkdir(ro, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	// 先恢复权限，否则 TempDir 的清理删不掉只读目录里的东西。
+	t.Cleanup(func() { _ = os.Chmod(ro, 0o700) })
+
+	for _, tc := range []struct{ name, path string }{
+		{"unwritable dir", filepath.Join(ro, "gitweb.state.json")},
+		{"missing dir", filepath.Join(dir, "nope", "gitweb.state.json")},
+	} {
+		r := New()
+		err := r.EnablePersistence(tc.path)
+		if err == nil {
+			t.Fatalf("%s: expected error, got nil", tc.name)
+		}
+		// store 未挂上 = 后续 Register 不会去写一个永远写不进去的路径。
+		if r.store != nil {
+			t.Errorf("%s: store attached despite probe failure", tc.name)
+		}
+	}
+}
+
+func TestEnablePersistenceRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "gitweb.state.json")
+
+	r := New()
+	if err := r.EnablePersistence(path); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Register("https://github.com/o/repo", "keep", "dev", "github",
+		&Auth{Type: "token", Token: "secret-token"}, true); err != nil {
+		t.Fatal(err)
+	}
+	r.IncrementViews("keep")
+	r.Close() // 停 flush goroutine 并把 dirty 的浏览数落盘
+
+	r2 := New()
+	if err := r2.EnablePersistence(path); err != nil {
+		t.Fatal(err)
+	}
+	site, err := r2.Get("keep")
+	if err != nil {
+		t.Fatalf("site lost across reload: %v", err)
+	}
+	if site.Ref != "dev" {
+		t.Errorf("Ref = %q, want dev", site.Ref)
+	}
+	if !site.Hidden {
+		t.Error("Hidden = false, want true")
+	}
+	if site.Views != 1 {
+		t.Errorf("Views = %d, want 1", site.Views)
+	}
+	// 不变量：state 文件不含凭据，reload 后 Auth 必为 nil。
+	if site.Auth != nil {
+		t.Errorf("Auth = %+v, want nil（凭据不持久化）", site.Auth)
+	}
+	if got := len(r2.ListPublic()); got != 0 {
+		t.Errorf("ListPublic = %d, want 0（hidden 站点不进公开列表）", got)
 	}
 }

@@ -13,7 +13,8 @@
 - **可选站点密码**：在配置中或通过 `-password` 参数设置密码后，访问任何页面都需要登录。不设置则默认公开访问
 - **文件树**：可浮动、拖拽的文件浏览器，用于在仓库中导航
 - **单二进制文件**：前端资源（模板、CSS、JS）通过 `//go:embed` 嵌入 Go 二进制。发布的压缩包和 Docker 镜像仅包含单个二进制文件，不需要额外的 `web/` 目录
-- **内存缓存**：LRU + TTL 缓存；重启后清空（无状态）
+- **内存缓存**：LRU + TTL 缓存；重启后清空已拉取的文件内容
+- **站点注册表持久化**：运行期添加的站点通过 JSON state 文件跨重启保留（`-state` / `GITWEB_STATE`）。文件只存路由数据 —— 路径 ID、git URL、ref、平台、浏览数、hidden 标记，绝不存凭据。详见下文〈站点 state 文件〉
 - **安全**：SSRF 防护（拦截私网/回环地址）、基于流式读取的文件大小限制、严格的 CSP、沙箱化的 HTML 渲染
 - **响应式 UI**：支持暗色模式和中英双语
 
@@ -36,21 +37,28 @@ go build -o gitweb ./cmd/gitweb
 
 # 设置访问密码
 ./gitweb --password your-secret
+
+# 把站点注册表持久化到指定路径
+# （默认 ./gitweb.state.json，相对的是进程当前工作目录）
+./gitweb --state /var/lib/gitweb/gitweb.state.json
 ```
 
 ### 使用 Docker 运行
 
 ```bash
 # 使用预构建镜像
+# 命名卷保住站点注册表（/data/gitweb.state.json），重建容器后依然在。
+# 不挂这个卷的话，运行期添加的站点会随容器重建丢失。
 docker run -d -p 8080:8080 \
   -v $(pwd)/config.yaml:/app/config.yaml:ro \
+  -v gitweb-state:/data \
   --name gitweb \
   ${DOCKERHUB_USERNAME}/gitweb:latest \
   /app/gitweb --config /app/config.yaml
 
 # 或本地构建
 docker build -t gitweb .
-docker run -d -p 8080:8080 gitweb
+docker run -d -p 8080:8080 -v gitweb-state:/data gitweb
 ```
 
 访问 `http://localhost:8080` 即可注册仓库。
@@ -90,6 +98,30 @@ sites:
 ```
 
 > 这是一个**公共服务**：没有注册鉴权，任何人都可以注册仓库。依赖 SSRF 防护、文件大小限制和缓存/超时上限来约束滥用。
+
+### 站点 state 文件
+
+运行期添加的站点会落盘到一个 JSON 文件，从而跨重启保留。
+
+- **路径**：`-state /path/to/state.json`，其次 `$GITWEB_STATE`，最后才是 `./gitweb.state.json`。
+  任一层取空值（`-state ""` 或 `GITWEB_STATE=""`）即以纯内存运行 —— 重启后运行期添加的站点全部丢失。
+- **优先级**：显式 `-state` > `GITWEB_STATE` > 内置默认值。
+- **存什么**：路径 ID、git URL、ref、平台、创建时间、浏览数、hidden 标记。**绝不存凭据** ——
+  token 与密码只留在浏览器（sessionStorage）里。
+- **与 config 中 `sites:` 的关系**：state 优先。预置站点只在其 pathid / git_url 尚未注册时才补种，
+  所以改 `config.yaml` 不会重置一份已经跑起来的注册表。
+
+两个运维上的坑：
+
+- 默认值 `./gitweb.state.json` 是相对**进程当前工作目录**解析的，不是二进制所在目录。在 systemd
+  或各类守护进程下，这个目录往往不是你以为的那个，而且服务账号未必有写权限。部署时请给绝对路径；
+  启动日志会打印解析后的绝对路径和有效 uid。
+- 一个 state 文件只能有**一个写者**。每次落盘都会用该进程内存里的完整注册表重写整个文件，
+  两个实例共用一个路径会互相抹掉对方的站点。每个实例给独立路径。
+
+写入是原子的（同目录临时文件 + rename，权限 `0600`）。浏览数走防抖 —— 每 5 秒一次、退出前再补一次；
+注册、删除、可见性变更则立即落盘。若目标目录不可写，gitweb 会在启动时直接退出，
+而不是揣着一个永远写不进去的持久化继续服务。
 
 ## API
 
