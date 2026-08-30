@@ -6,6 +6,7 @@
     <title>{{ .RepoName }} - gitweb</title>
     <link rel="stylesheet" href="/static/css/viewer.css">
     <link rel="stylesheet" href="/static/css/toast.css">
+    <script src="/static/js/theme.js"></script>
 </head>
 <body>
     <!-- 浮动文件树窗口：可拖动 / 可缩放 / 可缩为迷你浮岛（贴边吸附） -->
@@ -269,41 +270,33 @@
         return currentLang === 'zh' ? fallbackZh : fallbackEn;
     }
 
-    function applyTheme(theme) {
-        document.documentElement.setAttribute('data-theme', theme);
+    // 主题三态：auto（跟随系统）/ light / dark，解析与持久化都在 theme.js。
+    // 图标随实际呈现（太阳/月亮），文案随用户选择（跟随系统/浅色/深色）。
+    function updateThemeBtn() {
         const btn = document.getElementById('theme-toggle-viewer');
         if (!btn) return;
-        // 图标 + 文案 = 当前状态：dark → 月亮 + "暗色主题"；light → 太阳 + "亮色主题"
-        btn.classList.toggle('checked', theme === 'dark');
+        btn.classList.toggle('checked', GitTheme.resolved() === 'dark');
         const label = btn.querySelector('.si-label');
         if (label) {
-            const en = theme === 'dark' ? 'Dark theme' : 'Light theme';
-            const zh = theme === 'dark' ? '暗色主题' : '亮色主题';
-            label.textContent = currentLang === 'zh' ? zh : en;
-            label.setAttribute('data-en', en);
-            label.setAttribute('data-zh', zh);
+            const map = { auto: ['System', '跟随系统'], light: ['Light', '浅色'], dark: ['Dark', '深色'] };
+            const pair = map[GitTheme.mode()];
+            label.textContent = currentLang === 'zh' ? pair[1] : pair[0];
+            label.setAttribute('data-en', pair[0]);
+            label.setAttribute('data-zh', pair[1]);
         }
     }
 
     function initTheme() {
-        const saved = localStorage.getItem('theme');
-        const systemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-        applyTheme(saved || (systemDark ? 'dark' : 'light'));
+        updateThemeBtn();
+        document.addEventListener('gitthemechange', updateThemeBtn);
 
         const toggle = document.getElementById('theme-toggle-viewer');
         if (toggle) {
             toggle.addEventListener('click', () => {
-                const cur = document.documentElement.getAttribute('data-theme');
-                const next = cur === 'dark' ? 'light' : 'dark';
-                applyTheme(next);
-                localStorage.setItem('theme', next);
+                GitTheme.cycle();
                 closeSettings();
             });
         }
-
-        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
-            if (!localStorage.getItem('theme')) applyTheme(e.matches ? 'dark' : 'light');
-        });
     }
 
     function applyLang(lang) {
@@ -321,8 +314,7 @@
         document.querySelectorAll('[data-en-title][data-zh-title]').forEach(el => {
             el.title = lang === 'zh' ? el.getAttribute('data-zh-title') : el.getAttribute('data-en-title');
         });
-        const cur = document.documentElement.getAttribute('data-theme') || 'light';
-        applyTheme(cur);
+        updateThemeBtn();
         // 三个「动态文案」按钮：label 由各自 update 函数按 currentLang 重算
         updateHiddenFilesBtn();
         updateLineNumbersBtn();

@@ -107,10 +107,11 @@
             --error: #f87171;
         }
     </style>
+    <script src="/static/js/theme.js"></script>
 </head>
 <body>
     <div class="controls">
-        <button id="theme-toggle" class="icon-btn" title="Toggle theme" aria-label="Toggle theme">
+        <button id="theme-toggle" class="icon-btn" data-theme-toggle title="切换主题" aria-label="切换主题">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
         </button>
         <button id="lang-toggle" class="icon-btn" title="Switch language" aria-label="Switch language">EN</button>
@@ -144,30 +145,6 @@
     (function () {
         var currentLang = localStorage.getItem('lang') || (navigator.language.startsWith('zh') ? 'zh' : 'en');
 
-        function applyTheme(theme) {
-            document.documentElement.setAttribute('data-theme', theme);
-        }
-
-        function initTheme() {
-            var saved = localStorage.getItem('theme');
-            var systemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-            applyTheme(saved || (systemDark ? 'dark' : 'light'));
-
-            var toggle = document.getElementById('theme-toggle');
-            if (toggle) {
-                toggle.addEventListener('click', function () {
-                    var cur = document.documentElement.getAttribute('data-theme') || 'light';
-                    var next = cur === 'dark' ? 'light' : 'dark';
-                    applyTheme(next);
-                    localStorage.setItem('theme', next);
-                });
-            }
-
-            window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function (e) {
-                if (!localStorage.getItem('theme')) applyTheme(e.matches ? 'dark' : 'light');
-            });
-        }
-
         function applyLang(lang) {
             document.documentElement.setAttribute('lang', lang === 'zh' ? 'zh-CN' : 'en');
             document.querySelectorAll('[data-en][data-zh]').forEach(function (el) {
@@ -178,6 +155,7 @@
             document.querySelectorAll('[data-en-placeholder][data-zh-placeholder]').forEach(function (el) {
                 el.placeholder = lang === 'zh' ? el.getAttribute('data-zh-placeholder') : el.getAttribute('data-en-placeholder');
             });
+            GitTheme.sync();
         }
 
         function initLang() {
@@ -196,7 +174,6 @@
             }
         }
 
-        initTheme();
         initLang();
     })();
     </script>

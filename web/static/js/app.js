@@ -2,32 +2,6 @@
     let currentLang = localStorage.getItem('lang') || 
                       (navigator.language.startsWith('zh') ? 'zh' : 'en');
 
-    function initTheme() {
-        // 自动检测系统暗黑模式
-        const savedTheme = localStorage.getItem('theme');
-        const systemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-        const initialTheme = savedTheme || (systemDark ? 'dark' : 'light');
-        
-        document.documentElement.setAttribute('data-theme', initialTheme);
-
-        const themeToggle = document.getElementById('theme-toggle');
-        if (themeToggle) {
-            themeToggle.addEventListener('click', () => {
-                const current = document.documentElement.getAttribute('data-theme');
-                const newTheme = current === 'dark' ? 'light' : 'dark';
-                document.documentElement.setAttribute('data-theme', newTheme);
-                localStorage.setItem('theme', newTheme);
-            });
-        }
-        
-        // 监听系统暗黑模式变化
-        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
-            if (!localStorage.getItem('theme')) {
-                document.documentElement.setAttribute('data-theme', e.matches ? 'dark' : 'light');
-            }
-        });
-    }
-
     // =========================================================
     //  共享工具：HTML 转义 + 站点卡片渲染
     //  站点字段（git_url / ref）来自公开注册接口，写入 innerHTML 前必须转义。
@@ -89,6 +63,8 @@
                 mainInput.getAttribute('data-placeholder-en');
             mainInput.placeholder = placeholder;
         }
+
+        GitTheme.sync();
     }
 
     function initForm() {
@@ -272,7 +248,6 @@
     })();
 
     document.addEventListener('DOMContentLoaded', () => {
-        initTheme();
         initLang();
         initForm();
         if (document.getElementById('sites-list')) {
