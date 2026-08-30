@@ -75,10 +75,12 @@ listen: ":8080"
 # 留空或不设置则默认公开访问。
 # password: "your-secret-password"
 
-# 站点注册表落盘位置（详见下文〈站点 state 文件〉）。
-# 留空或不写这一行都视为未配置，回落到 $GITWEB_STATE / ./gitweb.state.json；
-# 本行不能用来关闭持久化，要纯内存请用 -state "" 或 GITWEB_STATE=""。
-# state_file: /var/lib/gitweb/gitweb.state.json
+# 站点注册表落盘位置（详见下文〈站点 state 文件〉）。优先级：显式 -state > 本行 > $GITWEB_STATE
+# > ./gitweb.state.json。请给绝对路径 —— 相对路径相对的是进程当前工作目录。留空或不写这一行都
+# 视为未配置，会继续向下一层继承；本行不能用来关闭持久化，要纯内存请用 -state "" 或 GITWEB_STATE=""。
+# 容器部署注意：本行优先级压过镜像里的 GITWEB_STATE=/data/gitweb.state.json，用命名卷请把值写成
+# /data/gitweb.state.json。
+state_file: /var/lib/gitweb/gitweb.state.json  # 换成你自己的绝对路径
 
 cache:
   ttl: 60s

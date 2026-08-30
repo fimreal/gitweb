@@ -254,10 +254,10 @@ gitweb 是一个用 Go + Gin 实现的轻量服务：给定任意 git 仓库地�
 base_url: https://gitweb.example.com   # 用于生成可访问链接，反代场景见 §8
 listen: ":8080"
 # password: "your-secret"              # 可选全局访问密码；留空 = 公开访问（默认）
-# state_file: /var/lib/gitweb/gitweb.state.json
-#                                      ^ 注册表落盘路径；服务化部署请给绝对路径（相对路径跟进程 CWD 走）
-#                                      留空/不写/`${VAR}` 未赋值 = 未配置，继续继承 GITWEB_STATE 再落默认值，
-#                                      不表示关闭持久化；要纯内存只能用 `-state ""` 或 `GITWEB_STATE=""`
+# state_file 留空/不写/`${VAR}` 未赋值 = 未配置，继续继承 GITWEB_STATE 再落默认值，
+# 不表示关闭持久化；要纯内存只能用 `-state ""` 或 `GITWEB_STATE=""`。
+# 容器注意：本行优先级压过镜像里的 GITWEB_STATE=/data/gitweb.state.json。
+state_file: /var/lib/gitweb/gitweb.state.json   # 注册表落盘路径（绝对路径，见 §6 末段）
 cache:
   ttl: 60s
   max_entries: 2048

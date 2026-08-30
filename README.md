@@ -75,10 +75,14 @@ listen: ":8080"
 # Leave empty / unset for public access (the default).
 # password: "your-secret-password"
 
-# Where the site registry is persisted (see "Site state file" below).
-# Empty / omitted falls back to $GITWEB_STATE / ./gitweb.state.json — it does not disable
-# persistence. Use `-state ""` or `GITWEB_STATE=""` for a memory-only run.
-# state_file: /var/lib/gitweb/gitweb.state.json
+# Where the site registry is persisted (see "Site state file" below). Priority: explicit
+# `-state` > this key > $GITWEB_STATE > ./gitweb.state.json. Give an absolute path — a
+# relative one resolves against the process working directory. Empty / omitted means "not
+# configured" and falls through to the next layer; it does not disable persistence. Use
+# `-state ""` or `GITWEB_STATE=""` for a memory-only run. In containers this key outranks
+# the image's `GITWEB_STATE=/data/gitweb.state.json` — use `/data/gitweb.state.json` to keep
+# the named volume.
+state_file: /var/lib/gitweb/gitweb.state.json  # your own absolute path
 
 cache:
   ttl: 60s
