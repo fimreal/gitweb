@@ -28,14 +28,16 @@ fetch:
   rate_limit: 100
 
 # ── 站点注册表持久化 ──────────────────────────────────────────────
-# 不在这份文件里配置，由启动参数决定（两者等价）：
-#   ./gitweb -config /opt/gitweb/config.yaml -state /var/lib/gitweb/gitweb.state.json
-#   GITWEB_STATE=/var/lib/gitweb/gitweb.state.json ./gitweb -config ...
-# 优先级：显式 -state > GITWEB_STATE > 默认 ./gitweb.state.json。
-# 取空串（-state "" 或 GITWEB_STATE=""）= 纯内存，重启即丢掉所有运行期添加的站点。
-# 默认值是相对「进程当前工作目录」而非本文件或二进制所在目录 —— 服务化部署务必给绝对路径；
-# 目录不可写时 gitweb 直接退出，不会带着写不进去的持久化继续跑。
+# state_file 指定注册表落盘位置。优先级：显式 -state > 本行 state_file > GITWEB_STATE
+# > 默认 ./gitweb.state.json（相对「进程当前工作目录」，不是本文件或二进制所在目录 ——
+# 服务化部署请给绝对路径；目录不可写时 gitweb 直接退出，不会带着写不进去的持久化继续跑）。
+# 空值 = 未配置（不写这一行、写 ""、或 ${VAR} 未赋值展开成空都算），继续向下继承。
+# 本行不能用来关闭持久化（config.yaml 整份会过环境变量展开，未赋值的 ${VAR} 就是空串，
+# 把空值当「关掉」等于让一个漏设的变量静默丢站点）；要关只能用 -state "" 或 GITWEB_STATE=""，
+# 那时重启即丢掉运行期添加的站点。
+# 命令行等价写法：./gitweb -config config.yaml -state /var/lib/gitweb/gitweb.state.json
 # state 文件只存 pathid / git_url / ref / provider / 创建时间 / 浏览数 / hidden，不含任何凭据。
+# state_file: /var/lib/gitweb/gitweb.state.json
 #
 # 下面的 sites 只是「补种」：启动时 state 里已有同 pathid 或同 git_url 的站点就跳过，
 # state 才是运行时唯一真相源 —— 改这里不会重置已在跑的注册表。

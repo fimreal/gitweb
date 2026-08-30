@@ -9,12 +9,17 @@ import (
 )
 
 type Config struct {
-	BaseURL  string      `yaml:"base_url"`
-	Listen   string      `yaml:"listen"`
-	Password string      `yaml:"password"` // 可选：若非空则所有页面需登录后才能访问
-	Cache    CacheConfig `yaml:"cache"`
-	Fetch    FetchConfig `yaml:"fetch"`
-	Sites    []SiteSpec  `yaml:"sites"`
+	BaseURL  string `yaml:"base_url"`
+	Listen   string `yaml:"listen"`
+	Password string `yaml:"password"` // 可选：若非空则所有页面需登录后才能访问
+	// StateFile 是站点注册表落盘路径，对应命令行 -state / 环境变量 GITWEB_STATE。
+	// 空值（不写这一行、写 ""、或 ${VAR} 未赋值展开成空）一律视为「未配置」，继续向下继承。
+	// config 层刻意不提供关闭持久化的能力：本文件整份会过 os.ExpandEnv，把空串解读成「关掉」
+	// 就等于让一个未赋值的变量静默丢掉全部站点。要关只能用 -state "" 或 GITWEB_STATE=""。
+	StateFile string      `yaml:"state_file"`
+	Cache     CacheConfig `yaml:"cache"`
+	Fetch     FetchConfig `yaml:"fetch"`
+	Sites     []SiteSpec  `yaml:"sites"`
 }
 
 type CacheConfig struct {
