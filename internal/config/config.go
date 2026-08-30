@@ -33,11 +33,11 @@ type FetchConfig struct {
 }
 
 type SiteSpec struct {
-	GitURL  string    `yaml:"git_url"`
-	PathID  string    `yaml:"pathid"`
-	Ref     string    `yaml:"ref"`
-	Hidden  bool      `yaml:"hidden"`
-	Auth    *AuthSpec `yaml:"auth,omitempty"`
+	GitURL string    `yaml:"git_url"`
+	PathID string    `yaml:"pathid"`
+	Ref    string    `yaml:"ref"`
+	Hidden bool      `yaml:"hidden"`
+	Auth   *AuthSpec `yaml:"auth,omitempty"`
 }
 
 type AuthSpec struct {
@@ -83,7 +83,7 @@ func setDefaults(cfg *Config) {
 	if cfg.Fetch.RateLimit == 0 {
 		cfg.Fetch.RateLimit = 100 // 默认 100 req/min per host
 	}
-	
+
 	// 从环境变量读取代理（如果配置文件未指定）
 	if cfg.Fetch.HTTPProxy == "" {
 		cfg.Fetch.HTTPProxy = os.Getenv("HTTP_PROXY")
@@ -97,7 +97,7 @@ func setDefaults(cfg *Config) {
 			cfg.Fetch.HTTPSProxy = os.Getenv("https_proxy")
 		}
 	}
-	
+
 	for i := range cfg.Sites {
 		if cfg.Sites[i].Ref == "" {
 			cfg.Sites[i].Ref = "main"

@@ -83,9 +83,9 @@ type Manager struct {
 	// rateLimiters: 按 host 分桶的令牌桶限流器。
 	// 每个 host 独立限流，避免单平台被过度请求，也避免某平台限流影响其他平台。
 	// 默认 100 req/min（约 6000 req/hour），可通过配置调整。
-	rateLimit     int           // 每分钟允许的请求数
-	rateBurst     int           // 令牌桶突发容量（默认与 rateLimit 相同）
-	rateLimiters  sync.Map      // host(string) -> *rate.Limiter
+	rateLimit    int      // 每分钟允许的请求数
+	rateBurst    int      // 令牌桶突发容量（默认与 rateLimit 相同）
+	rateLimiters sync.Map // host(string) -> *rate.Limiter
 }
 
 func NewManager(timeout time.Duration, httpProxy, httpsProxy string, allow, deny []string, maxSize int64, rateLimit int) *Manager {
@@ -227,11 +227,11 @@ func parseGitHubURL(gitURL string) (owner, repo string, err error) {
 
 	owner = parts[0]
 	repo = parts[1]
-	
+
 	// 如果 URL 包含 /tree/ 或 /blob/，只取前两部分（owner/repo）
 	// 例如：github.com/owner/repo/tree/main/path -> owner, repo
 	repo = strings.TrimSuffix(repo, ".git")
-	
+
 	return owner, repo, nil
 }
 
@@ -243,12 +243,12 @@ func NormalizeGitHubURL(inputURL string) (gitURL, ref string, err error) {
 	if err != nil {
 		return "", "", err
 	}
-	
+
 	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
 	if len(parts) < 2 {
 		return "", "", errors.New("invalid github url")
 	}
-	
+
 	owner := parts[0]
 	repo := strings.TrimSuffix(parts[1], ".git")
 	scheme := u.Scheme
@@ -256,14 +256,14 @@ func NormalizeGitHubURL(inputURL string) (gitURL, ref string, err error) {
 		scheme = "https"
 	}
 	gitURL = fmt.Sprintf("%s://%s/%s/%s", scheme, u.Host, owner, repo)
-	
+
 	// 检查是否包含 /tree/{ref} 或 /blob/{ref}
 	if len(parts) >= 4 && (parts[2] == "tree" || parts[2] == "blob") {
 		ref = parts[3]
 	} else {
 		ref = "main" // 默认分支
 	}
-	
+
 	return gitURL, ref, nil
 }
 
@@ -409,8 +409,10 @@ func parseGiteaURL(gitURL string) (scheme, host, owner, repo string, err error) 
 // IdentifyProvider 识别 Git URL 的提供商类型。
 // 已知关键字（github.com / gitlab.com / 含 gitea / gitlab 子串）走快速路径，
 // 不发网络请求；自托管实例（域名不含关键字）回退到 API 探测：
-//   GET <scheme>://<host>/api/v1/version  → 200 即 Gitea
-//   GET <scheme>://<host>/api/v4/version  → 200 即 GitLab
+//
+//	GET <scheme>://<host>/api/v1/version  → 200 即 Gitea
+//	GET <scheme>://<host>/api/v4/version  → 200 即 GitLab
+//
 // 探测正例按 host 缓存，避免对同一自托管站点重复探测；探测走 m.client（代理/超时生效），
 // 且每个探测 URL 先过 SSRF 校验。均未命中返回 ""。
 func (m *Manager) IdentifyProvider(gitURL string) string {

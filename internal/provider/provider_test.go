@@ -19,9 +19,9 @@ func newTestManager(t *testing.T, maxSize int64) *Manager {
 
 func TestNormalizeGitHubURL(t *testing.T) {
 	cases := []struct {
-		in        string
-		wantURL   string
-		wantRef   string
+		in      string
+		wantURL string
+		wantRef string
 	}{
 		{"https://github.com/o/repo", "https://github.com/o/repo", "main"},
 		{"https://github.com/o/repo/tree/dev/docs", "https://github.com/o/repo", "dev"},
@@ -317,4 +317,3 @@ func TestIdentifyProviderSSRFBlocked(t *testing.T) {
 		t.Fatalf("expected empty (SSRF blocked), got %q", got)
 	}
 }
-
