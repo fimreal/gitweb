@@ -8,11 +8,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
 	"net/url"
 	"path"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -608,6 +610,23 @@ func (s *Server) handleSiteFile(c *gin.Context) {
 		return
 	}
 
+	// Kind 只判定一次：后面的流式分派、raw 分支和最终渲染分支都要用它，
+	// 三处分别重算会让「哪条路径处理这个文件」出现口径分歧。
+	kind := s.renderer.Kind(filepath)
+
+	// 透传类文件边收边转，浏览器于是能按真实字节数画进度。md/txt 需要整体渲染、embed
+	// 需要套模板，拿不到流式收益，仍走下面的缓冲路径（前端只剩时间兜底）。
+	if streamable(kind, raw, embed) {
+		st, err := s.provider.FetchStream(c.Request.Context(), site.Provider, site.GitURL, ref, filepath, auth)
+		if err != nil {
+			s.serveFetchError(c, err)
+			return
+		}
+		defer st.Body.Close()
+		s.streamToClient(c, cacheKey, contentTypeFor(kind, raw, filepath), st)
+		return
+	}
+
 	content, err := s.provider.Fetch(context.Background(), site.Provider, site.GitURL, ref, filepath, auth)
 	if err != nil {
 		s.serveFetchError(c, err)
@@ -617,7 +636,7 @@ func (s *Server) handleSiteFile(c *gin.Context) {
 	// raw 模式：对文本类文件（HTML/MD/Text/代码）以 text/plain 返回原始字节。
 	// 图片/二进制不受 raw 影响（源码无意义），走正常流程。
 	if raw {
-		switch s.renderer.Kind(filepath) {
+		switch kind {
 		case render.KindHTML, render.KindMarkdown, render.KindText:
 			s.cache.Set(cacheKey, content)
 			c.Data(http.StatusOK, "text/plain; charset=utf-8", content)
@@ -628,7 +647,6 @@ func (s *Server) handleSiteFile(c *gin.Context) {
 	// embed 模式：返回独立渲染页面（分享链接用），只渲染文件内容，无 viewer chrome。
 	// HTML 文件本身已是完整页面，直接透传；其余类型渲染后套 embed 模板。
 	if embed {
-		kind := s.renderer.Kind(filepath)
 		filename := path.Base(filepath)
 		repoName := repoNameFromURL(site.GitURL)
 		switch kind {
@@ -674,7 +692,6 @@ func (s *Server) handleSiteFile(c *gin.Context) {
 	}
 
 	// 二进制/图片/HTML：直接缓存原始字节并透传；md/txt：缓存渲染片段。
-	kind := s.renderer.Kind(filepath)
 	switch kind {
 	case render.KindMarkdown, render.KindText:
 		rendered, err := s.renderer.Render(filepath, content)
@@ -691,6 +708,92 @@ func (s *Server) handleSiteFile(c *gin.Context) {
 		// KindHTML / KindImage / KindBinary / KindUnsupported：透传原始字节
 		s.cache.Set(cacheKey, content)
 		s.serveContent(c, filepath, content)
+	}
+}
+
+// cacheContentMaxBytes 是流式响应回填缓存的单文件上限。大文件本来就很少在同一次会话里
+// 打开第二次，却会把缓存挤满，超限的文件只透传、不缓存。
+const cacheContentMaxBytes = 2 << 20
+
+// streamable 判定该响应能否边收边转发。判据是「字节最终原样交给浏览器」：
+// 需要服务端整体渲染（md/txt）或需要套模板（embed）的都做不到。
+// raw 命中的文本类同样是原样透传（只是 Content-Type 换成 text/plain），所以可流式。
+func streamable(kind render.Kind, raw, embed bool) bool {
+	if embed {
+		return false
+	}
+	if raw {
+		return true
+	}
+	switch kind {
+	case render.KindHTML, render.KindImage, render.KindBinary, render.KindUnsupported:
+		return true
+	default:
+		return false
+	}
+}
+
+// contentTypeFor 与 serveContent 的 Content-Type 判定保持一致，否则流式与缓冲两条
+// 路径会给同一个文件发出不同的头。
+func contentTypeFor(kind render.Kind, raw bool, filepath string) string {
+	if raw {
+		switch kind {
+		case render.KindHTML, render.KindMarkdown, render.KindText:
+			return "text/plain; charset=utf-8"
+		}
+	}
+	switch kind {
+	case render.KindHTML:
+		return "text/html; charset=utf-8"
+	case render.KindImage:
+		return contentTypeForImage(filepath)
+	default:
+		return "application/octet-stream"
+	}
+}
+
+// streamToClient 把上游字节泵给客户端，同时攒一份副本用于回填缓存。
+// 每写一块必须 Flush：net/http 默认把响应攒在自己的缓冲里，不 Flush 就是最后一次性发出
+// —— 浏览器看到的又只剩「0% 直接跳 100%」，前面所有流式改动全部白做。
+// 缓存只在两个条件同时成立时写：干净读到 EOF、且全程没超过 cacheContentMaxBytes。
+// 半截 body 一旦进缓存，下一个用户会拿到一份静默损坏的文件内容。
+func (s *Server) streamToClient(c *gin.Context, cacheKey, contentType string, st *provider.Stream) {
+	// Content-Length 必须在 WriteHeader 之前写，写出去就改不了了。
+	if st.ContentLength >= 0 {
+		c.Header("Content-Length", strconv.FormatInt(st.ContentLength, 10))
+	}
+	c.Header("Content-Type", contentType)
+	c.Writer.WriteHeader(http.StatusOK)
+
+	chunk := make([]byte, 32*1024)
+	var buf []byte
+	buffered := true
+	for {
+		n, rerr := st.Body.Read(chunk)
+		if n > 0 {
+			if buffered {
+				if int64(len(buf)+n) <= cacheContentMaxBytes {
+					buf = append(buf, chunk[:n]...)
+				} else {
+					buf, buffered = nil, false
+				}
+			}
+			if _, werr := c.Writer.Write(chunk[:n]); werr != nil {
+				log.Printf("[stream-abort] key=%s err=%v", cacheKey, werr)
+				return
+			}
+			c.Writer.Flush()
+		}
+		if rerr != nil {
+			if rerr != io.EOF {
+				log.Printf("[stream-error] key=%s err=%v", cacheKey, rerr)
+				return
+			}
+			break
+		}
+	}
+	if buffered {
+		s.cache.Set(cacheKey, buf)
 	}
 }
 
