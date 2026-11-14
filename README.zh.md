@@ -97,6 +97,14 @@ fetch:
   allow_hosts: []
   deny_hosts: []
 
+# 在内置可渲染文本扩展名表（文档/代码/脚本，含 .ps1/.psm1/.psd1/.bat/.cmd/.reg/.vbs）
+# 之外追加扩展名：命中的文件按纯文本/代码渲染，且 ?raw=1 以 text/plain 返回原始源码。
+# 取值可带或不带前导点，大小写不敏感；留空（默认）不追加任何扩展名。
+# 注意上面七个 Windows 脚本扩展名已内置并按文本渲染 —— 这是相对旧版本的有意变化，
+# 不因本项留空而回退。
+render:
+  extra_text_exts: []  # 例如 [".tf", "hcl"]
+
 sites:
   - git_url: https://github.com/username/repo
     pathid: mysite

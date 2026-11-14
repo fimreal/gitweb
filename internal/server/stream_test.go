@@ -1,9 +1,11 @@
 package server
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -37,6 +39,12 @@ func (f *streamFixture) fetch(t *testing.T, target string) *httptest.ResponseRec
 // 并把 pathid=site 指向模拟源站，绕开注册接口直接验文件路由。
 func newStreamFixture(t *testing.T, files map[string]string) *streamFixture {
 	t.Helper()
+	return newStreamFixtureWithRenderer(t, files, render.New())
+}
+
+// newStreamFixtureWithRenderer 允许注入带配置的 Renderer（如自定义 extra_text_exts）。
+func newStreamFixtureWithRenderer(t *testing.T, files map[string]string, renderer *render.Renderer) *streamFixture {
+	t.Helper()
 	gin.SetMode(gin.TestMode)
 	gin.DefaultWriter = io.Discard
 	gin.DefaultErrorWriter = io.Discard
@@ -44,6 +52,21 @@ func newStreamFixture(t *testing.T, files map[string]string) *streamFixture {
 	var hits atomic.Int64
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits.Add(1)
+		// Gitea 文件树接口：用同一个 files 表生成，供树过滤测试使用。
+		if r.URL.Path == "/api/v1/repos/o/repo/git/trees/main" {
+			names := make([]string, 0, len(files))
+			for name := range files {
+				names = append(names, name)
+			}
+			sort.Strings(names)
+			tree := make([]map[string]any, 0, len(names))
+			for _, name := range names {
+				tree = append(tree, map[string]any{"path": name, "type": "blob", "size": len(files[name])})
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"tree": tree})
+			return
+		}
 		name := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
 		body, ok := files[name]
 		if !ok {
@@ -56,7 +79,7 @@ func newStreamFixture(t *testing.T, files map[string]string) *streamFixture {
 
 	reg := registry.New()
 	prov := provider.NewManager(5*time.Second, "", "", []string{"127.0.0.1", "localhost"}, nil, 1<<20, 100, "")
-	srv := New(reg, prov, cache.New(time.Minute, 16), render.New(), testBaseURL, "")
+	srv := New(reg, prov, cache.New(time.Minute, 16), renderer, testBaseURL, "")
 	if _, err := reg.Register(up.URL+"/o/repo", "site", "main", "gitea", nil, false); err != nil {
 		t.Fatalf("register site: %v", err)
 	}
@@ -97,6 +120,156 @@ func TestStreamedPassthroughCarriesLengthAndHitsCache(t *testing.T) {
 	}
 	if n := f.hits.Load(); n != 1 {
 		t.Errorf("upstream hits = %d, want 1 (second request should come from cache)", n)
+	}
+}
+
+// TestScriptExtensionsServeAsText 锁定 Windows 脚本扩展名的分发契约：
+// 普通浏览页按文本渲染成 <pre><code>，?raw=1 以 text/plain 返回原始源码
+// （否则 `irm <url>?raw=1 | iex` 拿到的是字节流而不是脚本）。
+func TestScriptExtensionsServeAsText(t *testing.T) {
+	ps1 := "Write-Host 'hi'\n$env:FOO = 'bar'\n"
+	cmd := "@echo off\r\necho hi\r\n"
+	f := newStreamFixture(t, map[string]string{"bootstrap.ps1": ps1, "install.cmd": cmd})
+
+	raw := f.fetch(t, "/site/bootstrap.ps1?raw=1")
+	if got := raw.Header().Get("Content-Type"); got != "text/plain; charset=utf-8" {
+		t.Errorf("ps1 raw Content-Type = %q, want text/plain; charset=utf-8", got)
+	}
+	if got := raw.Body.String(); got != ps1 {
+		t.Errorf("ps1 raw body = %q, want %q", got, ps1)
+	}
+
+	view := f.fetch(t, "/site/bootstrap.ps1")
+	if got := view.Header().Get("Content-Type"); got != "text/html; charset=utf-8" {
+		t.Errorf("ps1 view Content-Type = %q, want text/html; charset=utf-8", got)
+	}
+	if got := view.Body.String(); !strings.HasPrefix(got, "<pre><code>") || !strings.Contains(got, "Write-Host") {
+		t.Errorf("ps1 view body = %q, want plain-text rendering", got)
+	}
+
+	cmdRaw := f.fetch(t, "/site/install.cmd?raw=1")
+	if got := cmdRaw.Header().Get("Content-Type"); got != "text/plain; charset=utf-8" {
+		t.Errorf("cmd raw Content-Type = %q, want text/plain; charset=utf-8", got)
+	}
+	if got := cmdRaw.Body.String(); got != cmd {
+		t.Errorf("cmd raw body = %q, want %q", got, cmd)
+	}
+
+	cmdView := f.fetch(t, "/site/install.cmd")
+	if got := cmdView.Header().Get("Content-Type"); got != "text/html; charset=utf-8" {
+		t.Errorf("cmd view Content-Type = %q, want text/html; charset=utf-8", got)
+	}
+	if got := cmdView.Body.String(); !strings.HasPrefix(got, "<pre><code>") || !strings.Contains(got, "@echo off") {
+		t.Errorf("cmd view body = %q, want plain-text rendering", got)
+	}
+}
+
+// TestScriptExtensionsEscapeInjection 锁住 .reg/.vbs 及自定义扩展名的安全边界：
+// 内容一律走 KindText 转义，普通浏览响应里不能出现可执行标签，raw 仍是原始字节。
+func TestScriptExtensionsEscapeInjection(t *testing.T) {
+	payload := `<script>alert(1)</script></code><img src=x onerror=alert(1)>`
+	files := map[string]string{
+		"evil.reg": payload,
+		"evil.vbs": payload,
+		"evil.abc": payload,
+	}
+	f := newStreamFixtureWithRenderer(t, files, render.New(".abc"))
+
+	for _, name := range []string{"evil.reg", "evil.vbs", "evil.abc"} {
+		view := f.fetch(t, "/site/"+name)
+		if got := view.Header().Get("Content-Type"); got != "text/html; charset=utf-8" {
+			t.Errorf("%s view Content-Type = %q, want text/html; charset=utf-8", name, got)
+		}
+		body := view.Body.String()
+		if strings.Contains(body, "<script") || strings.Contains(body, "<img") {
+			t.Errorf("%s view body contains live tag: %q", name, body)
+		}
+		if !strings.Contains(body, "&lt;script&gt;") || !strings.Contains(body, "&lt;img") {
+			t.Errorf("%s view body missing escaped payload: %q", name, body)
+		}
+		// 注入的 </code> 必须被转义：响应里只剩包装标签自己那一个闭合。
+		if n := strings.Count(body, "</code>"); n != 1 {
+			t.Errorf("%s view body has %d </code> occurrences, want 1 (payload must stay escaped)", name, n)
+		}
+
+		raw := f.fetch(t, "/site/"+name+"?raw=1")
+		if got := raw.Header().Get("Content-Type"); got != "text/plain; charset=utf-8" {
+			t.Errorf("%s raw Content-Type = %q, want text/plain; charset=utf-8", name, got)
+		}
+		if got := raw.Body.String(); got != payload {
+			t.Errorf("%s raw body = %q, want %q", name, got, payload)
+		}
+	}
+}
+
+// TestTreeFilterFollowsExtraTextExts 验文件树过滤与渲染分派共用同一判定：
+// 内置脚本扩展名默认就在树里，自定义扩展名只在配置后出现。
+func TestTreeFilterFollowsExtraTextExts(t *testing.T) {
+	files := map[string]string{
+		"bootstrap.ps1": "Write-Host 'hi'\n",
+		"notes.abc":     "hello\n",
+	}
+	treePaths := func(f *streamFixture) map[string]bool {
+		t.Helper()
+		w := f.fetch(t, "/api/sites/site/tree")
+		if w.Code != http.StatusOK {
+			t.Fatalf("tree status = %d, want 200 (body %q)", w.Code, w.Body.String())
+		}
+		var out struct {
+			Files []struct {
+				Path string `json:"path"`
+			} `json:"files"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+			t.Fatalf("tree decode: %v (body %q)", err, w.Body.String())
+		}
+		paths := make(map[string]bool, len(out.Files))
+		for _, f := range out.Files {
+			paths[f.Path] = true
+		}
+		return paths
+	}
+
+	off := treePaths(newStreamFixture(t, files))
+	if !off["bootstrap.ps1"] {
+		t.Error("without config: tree should list built-in script extension bootstrap.ps1")
+	}
+	if off["notes.abc"] {
+		t.Error("without config: tree should filter out notes.abc (binary)")
+	}
+
+	on := treePaths(newStreamFixtureWithRenderer(t, files, render.New(".abc")))
+	if !on["bootstrap.ps1"] || !on["notes.abc"] {
+		t.Errorf("with config: tree = %v, want both bootstrap.ps1 and notes.abc", on)
+	}
+}
+
+// TestConfiguredExtraTextExts 验 render.extra_text_exts 端到端生效：同一扩展名
+// 不开配置时仍是二进制，开启后 raw 与渲染页都走文本路径。
+func TestConfiguredExtraTextExts(t *testing.T) {
+	src := "hello from a custom extension\n"
+	files := map[string]string{"notes.abc": src}
+
+	off := newStreamFixture(t, files)
+	if got := off.fetch(t, "/site/notes.abc?raw=1").Header().Get("Content-Type"); got != "application/octet-stream" {
+		t.Errorf("without config: Content-Type = %q, want application/octet-stream", got)
+	}
+
+	on := newStreamFixtureWithRenderer(t, files, render.New(".abc"))
+	raw := on.fetch(t, "/site/notes.abc?raw=1")
+	if got := raw.Header().Get("Content-Type"); got != "text/plain; charset=utf-8" {
+		t.Errorf("with config: raw Content-Type = %q, want text/plain; charset=utf-8", got)
+	}
+	if got := raw.Body.String(); got != src {
+		t.Errorf("with config: raw body = %q, want %q", got, src)
+	}
+
+	view := on.fetch(t, "/site/notes.abc")
+	if got := view.Header().Get("Content-Type"); got != "text/html; charset=utf-8" {
+		t.Errorf("with config: view Content-Type = %q, want text/html; charset=utf-8", got)
+	}
+	if got := view.Body.String(); !strings.HasPrefix(got, "<pre><code>") || !strings.Contains(got, "custom extension") {
+		t.Errorf("with config: view body = %q, want plain-text rendering", got)
 	}
 }
 

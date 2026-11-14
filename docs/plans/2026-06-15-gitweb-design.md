@@ -282,6 +282,12 @@ fetch:
   deny_hosts: []
   rate_limit: 100                      # 每分钟每个 host 允许的请求数，默认 100
   github_base_url: ""                  # GitHub Enterprise 实例根；空 = 公网 github.com
+render:
+  # 内置可渲染文本扩展名表（文档/代码/脚本，含 .ps1/.psm1/.psd1/.bat/.cmd/.reg/.vbs）
+  # 之外追加的扩展名，按纯文本/代码渲染且 ?raw=1 返回 text/plain。
+  # 可带或不带前导点、大小写不敏感；留空（默认）不追加任何扩展名。
+  # 那七个 Windows 脚本扩展名已内置并按文本渲染，是相对旧版本的有意变化，不因本项为空而回退。
+  extra_text_exts: []
 sites:                                  # 启动时预置站点
   - git_url: https://github.com/username/helloworld
     pathid: mytest
