@@ -327,8 +327,10 @@ func TestSiteFileCacheIsolatedByCredential(t *testing.T) {
 	if strings.Contains(w.Body.String(), content) {
 		t.Fatalf("anonymous fetch leaked private content: %q", w.Body.String())
 	}
-	if got := atomic.LoadInt32(&upstreamHits); got != 2 {
-		t.Fatalf("upstream hits after anonymous fetch = %d, want 2 (anonymous request must not hit the credentialed cache entry)", got)
+	// 假上游对无凭据统一 404，Gitea provider 会按 branch/tag/commit 三种 ref 形式
+	// 各探测一次（QEST-74），故匿名这一次逻辑抓取共产生 3 次上游命中：1+3=4。
+	if got := atomic.LoadInt32(&upstreamHits); got != 4 {
+		t.Fatalf("upstream hits after anonymous fetch = %d, want 4 (anonymous request must not hit the credentialed cache entry)", got)
 	}
 }
 
@@ -392,8 +394,9 @@ func TestSiteFileCachePresetAuthFallback(t *testing.T) {
 	if strings.Contains(w.Body.String(), content) {
 		t.Fatalf("other credential leaked preset-auth content: %q", w.Body.String())
 	}
-	if got := atomic.LoadInt32(&upstreamHits); got != 2 {
-		t.Fatalf("upstream hits after other-credential fetch = %d, want 2 (must not share preset-auth cache entry)", got)
+	// 同上：另一凭据被上游统一 404，三种 ref 形式各探测一次，1+3=4。
+	if got := atomic.LoadInt32(&upstreamHits); got != 4 {
+		t.Fatalf("upstream hits after other-credential fetch = %d, want 4 (must not share preset-auth cache entry)", got)
 	}
 }
 
