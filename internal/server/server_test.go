@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -26,18 +27,26 @@ const testBaseURL = "http://localhost:8080"
 // 可选传入访问密码：/login 仅在设置了密码时渲染，否则 302 跳回首页。
 func newTestServer(t *testing.T, password ...string) (*gin.Engine, *registry.Registry) {
 	t.Helper()
-	gin.SetMode(gin.TestMode)
-	gin.DefaultWriter = io.Discard
-	gin.DefaultErrorWriter = io.Discard
 
 	pw := ""
 	if len(password) > 0 {
 		pw = password[0]
 	}
 
-	reg := registry.New()
 	prov := provider.NewManager(5*time.Second, "", "", nil, nil, 1<<20, 100)
-	srv := New(reg, prov, cache.New(time.Minute, 16), render.New(), testBaseURL, pw)
+	return newTestServerWithProvider(t, prov, pw)
+}
+
+// newTestServerWithProvider 用调用方提供的 provider.Manager 装配测试路由，
+// 便于需要自定义白名单（如放行 httptest 的 127.0.0.1）的用例复用其余装配。
+func newTestServerWithProvider(t *testing.T, prov *provider.Manager, password string) (*gin.Engine, *registry.Registry) {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	gin.DefaultWriter = io.Discard
+	gin.DefaultErrorWriter = io.Discard
+
+	reg := registry.New()
+	srv := New(reg, prov, cache.New(time.Minute, 16), render.New(), testBaseURL, password)
 
 	r := srv.SetupRoutes()
 	tpl, err := web.LoadTemplates()
@@ -255,4 +264,70 @@ func jsonString(s string) string {
 		panic(err)
 	}
 	return string(b)
+}
+
+// TestSiteFileCacheIsolatedByCredential 回归测试缓存键的凭据隔离边界：
+// 私有仓库先被带凭据抓取并写入缓存后，匿名请求必须重新走上游鉴权并拿到 401，
+// 而不是命中前一个用户留下的缓存条目读出内容。
+func TestSiteFileCacheIsolatedByCredential(t *testing.T) {
+	const (
+		wantPath = "/owner/repo/raw/branch/main/private.txt"
+		wantAuth = "token secret-token"
+		content  = "private content"
+	)
+
+	var upstreamHits int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&upstreamHits, 1)
+		// 私有仓库对无凭据/错误凭据统一回 404（不泄露仓库存在性），
+		// provider 会把它翻译成 ErrAuthRequired，handler 再回 401。
+		if r.URL.Path != wantPath || r.Header.Get("Authorization") != wantAuth {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = io.WriteString(w, content)
+	}))
+	defer upstream.Close()
+
+	// 放行 httptest 的环回地址，否则 SSRF 防护会在请求上游前就拒绝。
+	prov := provider.NewManager(5*time.Second, "", "", []string{"127.0.0.1"}, nil, 1<<20, 100)
+	r, reg := newTestServerWithProvider(t, prov, "")
+	if _, err := reg.Register(upstream.URL+"/owner/repo", "priv", "main", "gitea", nil, false); err != nil {
+		t.Fatalf("register site: %v", err)
+	}
+
+	get := func(auth string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "/priv/private.txt", nil)
+		if auth != "" {
+			req.Header.Set("Authorization", "Bearer "+auth)
+		}
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		return w
+	}
+
+	// 1) 带凭据抓取成功，内容写入该凭据指纹对应的缓存条目。
+	if w := get("secret-token"); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), content) {
+		t.Fatalf("credentialed fetch: status %d body %q, want 200 containing %q", w.Code, w.Body.String(), content)
+	}
+
+	// 2) 同一凭据再次抓取应命中缓存：指纹稳定，不再打上游。
+	if w := get("secret-token"); w.Code != http.StatusOK {
+		t.Fatalf("second credentialed fetch: status %d, want 200", w.Code)
+	}
+	if got := atomic.LoadInt32(&upstreamHits); got != 1 {
+		t.Fatalf("upstream hits after two credentialed fetches = %d, want 1 (cache not reused for same credential)", got)
+	}
+
+	// 3) 匿名抓取：必须因凭据隔离而未命中缓存，重新鉴权失败。
+	w := get("")
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("anonymous fetch: status %d body %q, want 401 — credential-scoped cache leaked", w.Code, w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), content) {
+		t.Fatalf("anonymous fetch leaked private content: %q", w.Body.String())
+	}
+	if got := atomic.LoadInt32(&upstreamHits); got != 2 {
+		t.Fatalf("upstream hits after anonymous fetch = %d, want 2 (anonymous request must not hit the credentialed cache entry)", got)
+	}
 }
