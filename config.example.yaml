@@ -49,6 +49,8 @@ sites:
     # hidden: true   # 不进公开 /api/sites 列表；直链 /{pathid}/ 仍可访问。默认 false。
     # auth is only for preloaded private repos. For repos registered at runtime,
     # enter credentials in the browser when the repo is opened.
+    # 凭据只在首次播种时随站点进入内存，之后由 overlay 按 pathid 在每次请求时覆盖；
+    # 所以私有预置必须显式写 pathid（空 pathid 会拿到随机 id，重启后匹配不上）。
     # auth:
     #   type: token
     #   token: ${GITHUB_TOKEN}
