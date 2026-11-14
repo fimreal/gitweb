@@ -2,6 +2,8 @@ package provider
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -184,6 +186,22 @@ func hasAuth(a *Auth) bool {
 	return a != nil && (a.Token != "" || a.Username != "")
 }
 
+// AuthFingerprint 把凭据折叠成不可逆的短指纹，是按凭据隔离共享路径的唯一实现：
+// Fetch 的 singleflight 合并键与 server 层内容缓存键都用它。键里只放截断 sha256，
+// 原文不进键、也不进日志；匿名（nil）得到固定标记 "anon"，与任何凭据互不相同。
+func AuthFingerprint(a *Auth) string {
+	if a == nil {
+		return "anon"
+	}
+	h := sha256.New()
+	// 逐字段加 \x00 分隔，避免「字段拼接相同但切分不同」的歧义。
+	for _, part := range []string{a.Type, a.Token, a.Username, a.Password} {
+		h.Write([]byte(part))
+		h.Write([]byte{0})
+	}
+	return hex.EncodeToString(h.Sum(nil))[:16]
+}
+
 type Manager struct {
 	client         *http.Client
 	sf             singleflight.Group
@@ -287,7 +305,10 @@ func (m *Manager) Fetch(ctx context.Context, providerType, gitURL, ref, filepath
 		}
 	}
 
-	key := fmt.Sprintf("%s:%s:%s:%s", providerType, gitURL, ref, filepath)
+	// 合并键必须混入凭据指纹：singleflight 会把同 key 的并发请求共享同一次上游
+	// 结果，不含凭据时匿名请求可能搭上带凭据请求的便车拿到私有内容（与 server
+	// 层缓存键同一隔离边界）。相同凭据的并发仍正常合并。
+	key := fmt.Sprintf("%s:%s:%s:%s:%s", providerType, gitURL, ref, filepath, AuthFingerprint(auth))
 
 	v, err, _ := m.sf.Do(key, func() (interface{}, error) {
 		base := m.base(false)

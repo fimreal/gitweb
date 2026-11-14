@@ -220,7 +220,7 @@ Gitea 的 `ref` 支持分支、tag、commit SHA 三种。Gitea raw 端点区分�
 
 - **config**：配置加载（YAML + 环境变量插值）
 - **registry**：站点注册与查询（路径 ID 校验、保留前缀检查）
-- **provider**：从 GitHub/GitLab/Gitea 获取单个文件，按 URL scheme 路由，singleflight 去重
+- **provider**：从 GitHub/GitLab/Gitea 获取单个文件，按 URL scheme 路由，singleflight 去重（按凭据指纹隔离）
 - **cache**：内存 LRU + TTL 缓存（hashicorp/golang-lru/v2）
 - **render**：Markdown/HTML/文本 渲染 —— 可渲染文件类型的唯一判定来源
 - **server**：Gin HTTP 服务器，包含路径路由、SSRF 防护、大小限制、CSP
@@ -234,7 +234,7 @@ Gitea 的 `ref` 支持分支、tag、commit SHA 三种。Gitea raw 端点区分�
 - **限流**：按 host 分桶的令牌桶限流器，限制对外部 Git API 的请求（默认每个 host 100 req/min，可通过 `fetch.rate_limit` 配置）。防止滥用，并避免触及上游平台 API 限制（如 GitHub 未认证请求的 60 req/hour）。
 - **CSP + 沙箱**：浏览页面下发严格的 Content-Security-Policy；用户 `.html` 在 `<iframe sandbox="allow-same-origin">`（不含 `allow-scripts`）中渲染，阻止不可信脚本执行。
 - **凭据**：仅保存在浏览器（sessionStorage）中，随请求通过 `Authorization` 发送；服务端凭据仅用于当前请求，不写入缓存或持久化存储，不入日志，列表 API 也不会返回。
-- **缓存隔离**：服务端内容缓存键混入本次请求所用凭据的截断 SHA-256 指纹（匿名请求使用固定标记 `anon`），因此私有仓库被带凭据抓取后，在 TTL 内不会被匿名或不同凭据的访客命中缓存读到；凭据原文既不进缓存键，也不进缓存 value。
+- **缓存隔离**：服务端内容缓存键混入本次请求所用凭据的截断 SHA-256 指纹（匿名请求使用固定标记 `anon`），因此私有仓库被带凭据抓取后，在 TTL 内不会被匿名或不同凭据的访客命中缓存读到；provider 层 singleflight 的并发合并键同样混入该指纹，不同凭据的并发请求也不会共享同一次上游抓取结果。凭据原文既不进缓存键，也不进缓存 value。
 
 ## 许可证
 

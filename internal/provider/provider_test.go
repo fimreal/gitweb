@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // newTestManager 创建一个允许 127.0.0.1（httptest）的 Manager，用于模拟远端。
@@ -196,6 +197,201 @@ func TestFetchSSRFBlocked(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "SSRF") {
 		t.Errorf("expected SSRF error, got %v", err)
+	}
+}
+
+// ----- singleflight 凭据隔离：并发跨凭据不得共享上游结果 -----
+
+// requestGate 让 mock 上游把并发请求钉在同一个时间窗口里：每个请求先 arrive()
+// 登记，凑满 2 个即开闸；需要排队的 handler 调 wait() 等开闸或超时兜底。
+// 修复前跨凭据请求被合并成一次上游调用，永远凑不满 2 个，只能靠超时放行——
+// 两路拿到同一份结果，隔离断言必然失败；修复后两路各自成行，立即开闸。
+type requestGate struct {
+	mu   sync.Mutex
+	n    int
+	gate chan struct{}
+	once sync.Once
+}
+
+func (g *requestGate) arrive() {
+	g.mu.Lock()
+	g.n++
+	if g.n >= 2 {
+		g.once.Do(func() { close(g.gate) })
+	}
+	g.mu.Unlock()
+}
+
+func (g *requestGate) wait() {
+	select {
+	case <-g.gate:
+	case <-time.After(300 * time.Millisecond):
+	}
+}
+
+func (g *requestGate) count() int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.n
+}
+
+type fetchResult struct {
+	data []byte
+	err  error
+}
+
+// TestFetchConcurrentCredentialIsolation：相同 provider/URL/ref/path，带凭据与
+// 匿名的两路并发。带凭据的一路必须拿到内容；匿名的一路必须 ErrAuthRequired
+// 且拿不到任何内容——singleflight 合并键不含凭据时，匿名会搭上带凭据请求的
+// 便车读到私有内容（或反过来把带凭据的一路拖成未授权）。
+func TestFetchConcurrentCredentialIsolation(t *testing.T) {
+	g := &requestGate{gate: make(chan struct{})}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		g.arrive()
+		if r.Header.Get("Authorization") == "token secret" {
+			g.wait()
+			w.Write([]byte("private content"))
+			return
+		}
+		http.NotFound(w, r) // 私有仓库对匿名统一 404，三种 ref 形式都会试
+	}))
+	defer srv.Close()
+
+	m := newTestManager(t, 1<<20)
+	gitURL := srv.URL + "/o/repo"
+	auth := &Auth{Type: "token", Token: "secret"}
+
+	credentialed := make(chan fetchResult, 1)
+	anonymous := make(chan fetchResult, 1)
+	go func() {
+		d, err := m.Fetch(context.Background(), "gitea", gitURL, "main", "f.txt", auth)
+		credentialed <- fetchResult{d, err}
+	}()
+	go func() {
+		d, err := m.Fetch(context.Background(), "gitea", gitURL, "main", "f.txt", nil)
+		anonymous <- fetchResult{d, err}
+	}()
+
+	a := <-credentialed
+	if a.err != nil || string(a.data) != "private content" {
+		t.Fatalf("credentialed fetch = (%q, %v), want private content", a.data, a.err)
+	}
+	b := <-anonymous
+	if !errors.Is(b.err, ErrAuthRequired) || b.data != nil {
+		t.Fatalf("anonymous fetch = (%q, %v), want ErrAuthRequired and no content", b.data, b.err)
+	}
+}
+
+// TestFetchConcurrentDifferentCredentials：两个都有效但不同的凭据并发抓同一
+// 文件，上游按凭据返回不同内容，各路必须拿到自己的那份。
+func TestFetchConcurrentDifferentCredentials(t *testing.T) {
+	g := &requestGate{gate: make(chan struct{})}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		g.arrive()
+		g.wait()
+		switch r.Header.Get("Authorization") {
+		case "token alpha":
+			w.Write([]byte("content-alpha"))
+		case "token beta":
+			w.Write([]byte("content-beta"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	m := newTestManager(t, 1<<20)
+	gitURL := srv.URL + "/o/repo"
+
+	resA := make(chan fetchResult, 1)
+	resB := make(chan fetchResult, 1)
+	go func() {
+		d, err := m.Fetch(context.Background(), "gitea", gitURL, "main", "f.txt", &Auth{Type: "token", Token: "alpha"})
+		resA <- fetchResult{d, err}
+	}()
+	go func() {
+		d, err := m.Fetch(context.Background(), "gitea", gitURL, "main", "f.txt", &Auth{Type: "token", Token: "beta"})
+		resB <- fetchResult{d, err}
+	}()
+
+	if a := <-resA; a.err != nil || string(a.data) != "content-alpha" {
+		t.Fatalf("alpha fetch = (%q, %v), want content-alpha", a.data, a.err)
+	}
+	if b := <-resB; b.err != nil || string(b.data) != "content-beta" {
+		t.Fatalf("beta fetch = (%q, %v), want content-beta", b.data, b.err)
+	}
+}
+
+// TestFetchConcurrentSameCredentialStillMerges：凭据指纹隔离不能把 singleflight
+// 整个废掉——相同凭据的并发请求仍应合并为一次上游调用。
+func TestFetchConcurrentSameCredentialStillMerges(t *testing.T) {
+	g := &requestGate{gate: make(chan struct{})}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		g.arrive()
+		g.wait()
+		if r.Header.Get("Authorization") != "token secret" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Write([]byte("ok"))
+	}))
+	defer srv.Close()
+
+	m := newTestManager(t, 1<<20)
+	gitURL := srv.URL + "/o/repo"
+	auth := &Auth{Type: "token", Token: "secret"}
+
+	resA := make(chan fetchResult, 1)
+	resB := make(chan fetchResult, 1)
+	go func() {
+		d, err := m.Fetch(context.Background(), "gitea", gitURL, "main", "f.txt", auth)
+		resA <- fetchResult{d, err}
+	}()
+	go func() {
+		d, err := m.Fetch(context.Background(), "gitea", gitURL, "main", "f.txt", auth)
+		resB <- fetchResult{d, err}
+	}()
+
+	if a := <-resA; a.err != nil || string(a.data) != "ok" {
+		t.Fatalf("first fetch = (%q, %v), want ok", a.data, a.err)
+	}
+	if b := <-resB; b.err != nil || string(b.data) != "ok" {
+		t.Fatalf("second fetch = (%q, %v), want ok", b.data, b.err)
+	}
+	if n := g.count(); n != 1 {
+		t.Errorf("upstream requests = %d, want 1 (same-credential flights must merge)", n)
+	}
+}
+
+// ----- 凭据指纹 -----
+
+func TestAuthFingerprint(t *testing.T) {
+	if got := AuthFingerprint(nil); got != "anon" {
+		t.Errorf("nil auth fingerprint = %q, want anon", got)
+	}
+	a := &Auth{Type: "token", Token: "secret"}
+	fp := AuthFingerprint(a)
+	if fp != AuthFingerprint(a) {
+		t.Error("fingerprint must be stable for the same auth")
+	}
+	if len(fp) != 16 {
+		t.Errorf("fingerprint length = %d, want 16", len(fp))
+	}
+	if strings.Contains(fp, "secret") {
+		t.Error("fingerprint must not contain the raw credential")
+	}
+	if fp == AuthFingerprint(nil) {
+		t.Error("credentialed fingerprint must differ from anon")
+	}
+	if fp == AuthFingerprint(&Auth{Type: "token", Token: "other"}) {
+		t.Error("different tokens must produce different fingerprints")
+	}
+	if fp == AuthFingerprint(&Auth{Type: "basic", Username: "u", Password: "p"}) {
+		t.Error("token and basic credentials must produce different fingerprints")
+	}
+	// 字段切分歧义：「ab|c」与「a|bc」直接拼接相同，指纹必须不同。
+	if AuthFingerprint(&Auth{Type: "ab", Token: "c"}) == AuthFingerprint(&Auth{Type: "a", Token: "bc"}) {
+		t.Error("field-boundary ambiguity must produce different fingerprints")
 	}
 }
 
