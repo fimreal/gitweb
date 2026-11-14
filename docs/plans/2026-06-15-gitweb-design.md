@@ -270,6 +270,11 @@ fetch:
   allow_hosts: []                      # 放行可信自托管内网实例（解析到私网 IP 时必须显式 allow）
   deny_hosts: []
   rate_limit: 100                      # 每分钟每个 host 允许的请求数，默认 100
+render:
+  # 内置可渲染文本扩展名表（文档/代码/脚本，含 .ps1/.psm1/.psd1/.bat/.cmd/.reg/.vbs）
+  # 之外追加的扩展名，按纯文本/代码渲染且 ?raw=1 返回 text/plain。
+  # 可带或不带前导点、大小写不敏感；留空（默认）与不写本项行为一致。
+  extra_text_exts: []
 sites:                                  # 启动时预置站点
   - git_url: https://github.com/username/helloworld
     pathid: mytest

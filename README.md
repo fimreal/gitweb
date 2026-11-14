@@ -95,6 +95,14 @@ fetch:
   allow_hosts: []
   deny_hosts: []
 
+# Extra extensions rendered as plain text in addition to the built-in table
+# (docs, code, scripts incl. .ps1/.psm1/.psd1/.bat/.cmd/.reg/.vbs). Values may
+# be written with or without a leading dot; matching is case-insensitive.
+# Empty (the default) behaves exactly as if this key were absent.
+# Matched files get `?raw=1` served as text/plain.
+render:
+  extra_text_exts: []  # e.g. [".tf", "hcl"]
+
 sites:
   - git_url: https://github.com/username/repo
     pathid: mysite
