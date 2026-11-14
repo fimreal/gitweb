@@ -78,10 +78,34 @@ func mapStatus(resp *http.Response, providerName string, auth *Auth) error {
 	return fmt.Errorf("%s returned %d", providerName, resp.StatusCode)
 }
 
-// open 发请求并完成状态码判定，把**尚未读取**的响应体交给调用方：缓冲版在它上面调
-// readBody，流式版直接把 Body 接走边收边转发。非 200 时 open 已负责 Close。
-// setAuth 承载各 provider 的凭据头差异。
-func (b providerBase) open(ctx context.Context, client *http.Client, providerName, rawURL string, auth *Auth, setAuth func(*http.Request)) (*http.Response, error) {
+// applyAuth 是三种 provider 凭据头差异的唯一实现点：GitHub/Gitea 用
+// `Authorization: token`，GitLab 用 `PRIVATE-TOKEN`，Gitea 另接受 HTTP Basic。
+// provider 的取文件、文件树、分支列表都只调这一个入口，新增平台时不必再逐处改头。
+func applyAuth(req *http.Request, providerType string, auth *Auth) {
+	if auth == nil {
+		return
+	}
+	switch providerType {
+	case "github":
+		if auth.Token != "" {
+			req.Header.Set("Authorization", "token "+auth.Token)
+		}
+	case "gitlab":
+		if auth.Token != "" {
+			req.Header.Set("PRIVATE-TOKEN", auth.Token)
+		}
+	case "gitea":
+		if auth.Token != "" {
+			req.Header.Set("Authorization", "token "+auth.Token)
+		} else if auth.Username != "" {
+			req.SetBasicAuth(auth.Username, auth.Password)
+		}
+	}
+}
+
+// do 发请求但不做状态码判定，返回未读响应体，供需要自行处理非 200 的调用方使用
+// （如 Gitea 的 ref 类型探测要在一个 404 之后继续下一个候选）。
+func (b providerBase) do(ctx context.Context, client *http.Client, providerName, rawURL string, auth *Auth) (*http.Response, error) {
 	if err := b.checkSSRF(rawURL); err != nil {
 		return nil, err
 	}
@@ -92,8 +116,14 @@ func (b providerBase) open(ctx context.Context, client *http.Client, providerNam
 	if b.identity {
 		req.Header.Set("Accept-Encoding", "identity")
 	}
-	setAuth(req)
-	resp, err := client.Do(req)
+	applyAuth(req, providerName, auth)
+	return client.Do(req)
+}
+
+// open 发请求并完成状态码判定，把**尚未读取**的响应体交给调用方：缓冲版在它上面调
+// readBody，流式版直接把 Body 接走边收边转发。非 200 时 open 已负责 Close。
+func (b providerBase) open(ctx context.Context, client *http.Client, providerName, rawURL string, auth *Auth) (*http.Response, error) {
+	resp, err := b.do(ctx, client, providerName, rawURL, auth)
 	if err != nil {
 		return nil, err
 	}
@@ -126,6 +156,10 @@ type Manager struct {
 	deny       []string
 	maxSize    int64
 	probeCache sync.Map // host(string) -> providerType(string)；只缓存正例
+
+	// giteaRefKinds 缓存 Gitea ref 探测结果：host/owner/repo:ref -> branch|tag|commit。
+	// 同一站点的每个文件都要取，不缓存会让 tag/commit ref 的站点每个文件多打两次上游。
+	giteaRefKinds sync.Map
 
 	// rateLimiters: 按 host 分桶的令牌桶限流器。
 	// 每个 host 独立限流，避免单平台被过度请求，也避免某平台限流影响其他平台。
@@ -169,6 +203,20 @@ func NewManager(timeout time.Duration, httpProxy, httpsProxy string, allow, deny
 	}
 }
 
+// base 构造各 provider 共享的配置。identity 只在流式路径开启。
+func (m *Manager) base(identity bool) providerBase {
+	return providerBase{
+		allow:    m.allow,
+		deny:     m.deny,
+		maxSize:  m.maxSize,
+		identity: identity,
+	}
+}
+
+func (m *Manager) newGiteaProvider(base providerBase) *GiteaProvider {
+	return &GiteaProvider{client: m.client, providerBase: base, refKinds: &m.giteaRefKinds}
+}
+
 // getLimiter 返回指定 host 的 rate limiter，按需创建。
 func (m *Manager) getLimiter(host string) *rate.Limiter {
 	if v, ok := m.rateLimiters.Load(host); ok {
@@ -193,14 +241,14 @@ func (m *Manager) Fetch(ctx context.Context, providerType, gitURL, ref, filepath
 	key := fmt.Sprintf("%s:%s:%s:%s", providerType, gitURL, ref, filepath)
 
 	v, err, _ := m.sf.Do(key, func() (interface{}, error) {
-		base := providerBase{allow: m.allow, deny: m.deny, maxSize: m.maxSize}
+		base := m.base(false)
 		switch providerType {
 		case "github":
 			return (&GitHubProvider{client: m.client, providerBase: base}).Fetch(ctx, gitURL, ref, filepath, auth)
 		case "gitlab":
 			return (&GitLabProvider{client: m.client, providerBase: base}).Fetch(ctx, gitURL, ref, filepath, auth)
 		case "gitea":
-			return (&GiteaProvider{client: m.client, providerBase: base}).Fetch(ctx, gitURL, ref, filepath, auth)
+			return m.newGiteaProvider(base).Fetch(ctx, gitURL, ref, filepath, auth)
 		default:
 			return nil, fmt.Errorf("unsupported provider type: %s", providerType)
 		}
@@ -232,7 +280,7 @@ func (m *Manager) FetchStream(ctx context.Context, providerType, gitURL, ref, fi
 		}
 	}
 
-	base := providerBase{allow: m.allow, deny: m.deny, maxSize: m.maxSize, identity: true}
+	base := m.base(true)
 	var (
 		resp *http.Response
 		err  error
@@ -243,7 +291,7 @@ func (m *Manager) FetchStream(ctx context.Context, providerType, gitURL, ref, fi
 	case "gitlab":
 		resp, err = (&GitLabProvider{client: m.client, providerBase: base}).openFetch(ctx, gitURL, ref, filepath, auth)
 	case "gitea":
-		resp, err = (&GiteaProvider{client: m.client, providerBase: base}).openFetch(ctx, gitURL, ref, filepath, auth)
+		resp, err = m.newGiteaProvider(base).openFetch(ctx, gitURL, ref, filepath, auth)
 	default:
 		return nil, fmt.Errorf("unsupported provider type: %s", providerType)
 	}
@@ -313,11 +361,7 @@ func (p *GitHubProvider) openFetch(ctx context.Context, gitURL, ref, filepath st
 
 	// raw.githubusercontent.com 始终走 https，与仓库所在 host 的 scheme 无关
 	rawURL := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s/%s", owner, repo, ref, filepath)
-	return p.providerBase.open(ctx, p.client, "github", rawURL, auth, func(req *http.Request) {
-		if auth != nil && auth.Token != "" {
-			req.Header.Set("Authorization", "token "+auth.Token)
-		}
-	})
+	return p.providerBase.open(ctx, p.client, "github", rawURL, auth)
 }
 
 func parseGitHubURL(gitURL string) (owner, repo string, err error) {
@@ -397,11 +441,7 @@ func (p *GitLabProvider) openFetch(ctx context.Context, gitURL, ref, filepath st
 	encodedProject := url.PathEscape(projectPath)
 	apiURL := fmt.Sprintf("%s://%s/api/v4/projects/%s/repository/files/%s/raw?ref=%s",
 		scheme, host, encodedProject, encodedPath, url.QueryEscape(ref))
-	return p.providerBase.open(ctx, p.client, "gitlab", apiURL, auth, func(req *http.Request) {
-		if auth != nil && auth.Token != "" {
-			req.Header.Set("PRIVATE-TOKEN", auth.Token)
-		}
-	})
+	return p.providerBase.open(ctx, p.client, "gitlab", apiURL, auth)
 }
 
 func parseGitLabURL(gitURL string) (scheme, host, projectPath string, err error) {
@@ -426,6 +466,8 @@ func parseGitLabURL(gitURL string) (scheme, host, projectPath string, err error)
 type GiteaProvider struct {
 	client *http.Client
 	providerBase
+	// refKinds 缓存 ref 探测结果，可为 nil（不缓存）。
+	refKinds *sync.Map
 }
 
 func (p *GiteaProvider) Fetch(ctx context.Context, gitURL, ref, filepath string, auth *Auth) ([]byte, error) {
@@ -437,20 +479,70 @@ func (p *GiteaProvider) Fetch(ctx context.Context, gitURL, ref, filepath string,
 	return p.readBody(resp)
 }
 
+// giteaRefForms 是 Gitea raw URL 支持的 ref 形式，按常见程度排序。
+// Gitea 不会把 tag/commit 当成 branch 解析：同一个 SHA 在 /raw/branch/<sha> 下 404，
+// 在 /raw/commit/<sha> 下 200，因此必须按形式探测而不能只拼 branch。
+var giteaRefForms = []string{"branch", "tag", "commit"}
+
+// refOrder 返回本次要尝试的 ref 形式。命中缓存时把缓存过的形式排到最前：
+// 后续文件一次请求即可，同时保留回退——ref 从 tag 改成同名 branch 后缓存会自愈。
+func (p *GiteaProvider) refOrder(key string) []string {
+	if p.refKinds == nil {
+		return giteaRefForms
+	}
+	v, ok := p.refKinds.Load(key)
+	if !ok {
+		return giteaRefForms
+	}
+	cached := v.(string)
+	order := make([]string, 0, len(giteaRefForms))
+	order = append(order, cached)
+	for _, form := range giteaRefForms {
+		if form != cached {
+			order = append(order, form)
+		}
+	}
+	return order
+}
+
 func (p *GiteaProvider) openFetch(ctx context.Context, gitURL, ref, filepath string, auth *Auth) (*http.Response, error) {
 	scheme, host, owner, repo, err := parseGiteaURL(gitURL)
 	if err != nil {
 		return nil, err
 	}
 
-	rawURL := fmt.Sprintf("%s://%s/%s/%s/raw/branch/%s/%s", scheme, host, owner, repo, ref, filepath)
-	return p.providerBase.open(ctx, p.client, "gitea", rawURL, auth, func(req *http.Request) {
-		if auth != nil && auth.Token != "" {
-			req.Header.Set("Authorization", "token "+auth.Token)
-		} else if auth != nil && auth.Username != "" {
-			req.SetBasicAuth(auth.Username, auth.Password)
+	key := fmt.Sprintf("%s/%s/%s:%s", host, owner, repo, ref)
+	for _, form := range p.refOrder(key) {
+		rawURL := fmt.Sprintf("%s://%s/%s/%s/raw/%s/%s/%s", scheme, host, owner, repo, form, ref, filepath)
+		resp, err := p.providerBase.do(ctx, p.client, "gitea", rawURL, auth)
+		if err != nil {
+			return nil, err
 		}
-	})
+		switch resp.StatusCode {
+		case http.StatusOK:
+			if p.refKinds != nil {
+				p.refKinds.Store(key, form)
+			}
+			return resp, nil
+		case http.StatusUnauthorized, http.StatusForbidden:
+			// 上游说凭据不行，换 ref 形式没有意义。
+			resp.Body.Close()
+			return nil, ErrAuthRequired
+		case http.StatusNotFound:
+			// 可能只是 ref 形式不对：关掉响应，试下一种。
+			resp.Body.Close()
+		default:
+			resp.Body.Close()
+			return nil, fmt.Errorf("gitea returned %d", resp.StatusCode)
+		}
+	}
+
+	// 三种形式都 404：沿用全局语义 —— 无凭据视为需要鉴权（私有仓库不泄露存在性），
+	// 携带凭据才是真的 not-found（ref/文件不存在或凭据无权限）。
+	if !hasAuth(auth) {
+		return nil, ErrAuthRequired
+	}
+	return nil, ErrNotFound
 }
 
 func parseGiteaURL(gitURL string) (scheme, host, owner, repo string, err error) {
