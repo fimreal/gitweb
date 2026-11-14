@@ -1,9 +1,11 @@
 package server
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -50,6 +52,21 @@ func newStreamFixtureWithRenderer(t *testing.T, files map[string]string, rendere
 	var hits atomic.Int64
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits.Add(1)
+		// Gitea 文件树接口：用同一个 files 表生成，供树过滤测试使用。
+		if r.URL.Path == "/api/v1/repos/o/repo/git/trees/main" {
+			names := make([]string, 0, len(files))
+			for name := range files {
+				names = append(names, name)
+			}
+			sort.Strings(names)
+			tree := make([]map[string]any, 0, len(names))
+			for _, name := range names {
+				tree = append(tree, map[string]any{"path": name, "type": "blob", "size": len(files[name])})
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"tree": tree})
+			return
+		}
 		name := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
 		body, ok := files[name]
 		if !ok {
@@ -136,6 +153,94 @@ func TestScriptExtensionsServeAsText(t *testing.T) {
 	}
 	if got := cmdRaw.Body.String(); got != cmd {
 		t.Errorf("cmd raw body = %q, want %q", got, cmd)
+	}
+
+	cmdView := f.fetch(t, "/site/install.cmd")
+	if got := cmdView.Header().Get("Content-Type"); got != "text/html; charset=utf-8" {
+		t.Errorf("cmd view Content-Type = %q, want text/html; charset=utf-8", got)
+	}
+	if got := cmdView.Body.String(); !strings.HasPrefix(got, "<pre><code>") || !strings.Contains(got, "@echo off") {
+		t.Errorf("cmd view body = %q, want plain-text rendering", got)
+	}
+}
+
+// TestScriptExtensionsEscapeInjection 锁住 .reg/.vbs 及自定义扩展名的安全边界：
+// 内容一律走 KindText 转义，普通浏览响应里不能出现可执行标签，raw 仍是原始字节。
+func TestScriptExtensionsEscapeInjection(t *testing.T) {
+	payload := `<script>alert(1)</script></code><img src=x onerror=alert(1)>`
+	files := map[string]string{
+		"evil.reg": payload,
+		"evil.vbs": payload,
+		"evil.abc": payload,
+	}
+	f := newStreamFixtureWithRenderer(t, files, render.New(".abc"))
+
+	for _, name := range []string{"evil.reg", "evil.vbs", "evil.abc"} {
+		view := f.fetch(t, "/site/"+name)
+		if got := view.Header().Get("Content-Type"); got != "text/html; charset=utf-8" {
+			t.Errorf("%s view Content-Type = %q, want text/html; charset=utf-8", name, got)
+		}
+		body := view.Body.String()
+		if strings.Contains(body, "<script") || strings.Contains(body, "<img") {
+			t.Errorf("%s view body contains live tag: %q", name, body)
+		}
+		if !strings.Contains(body, "&lt;script&gt;") || !strings.Contains(body, "&lt;img") {
+			t.Errorf("%s view body missing escaped payload: %q", name, body)
+		}
+		// 注入的 </code> 必须被转义：响应里只剩包装标签自己那一个闭合。
+		if n := strings.Count(body, "</code>"); n != 1 {
+			t.Errorf("%s view body has %d </code> occurrences, want 1 (payload must stay escaped)", name, n)
+		}
+
+		raw := f.fetch(t, "/site/"+name+"?raw=1")
+		if got := raw.Header().Get("Content-Type"); got != "text/plain; charset=utf-8" {
+			t.Errorf("%s raw Content-Type = %q, want text/plain; charset=utf-8", name, got)
+		}
+		if got := raw.Body.String(); got != payload {
+			t.Errorf("%s raw body = %q, want %q", name, got, payload)
+		}
+	}
+}
+
+// TestTreeFilterFollowsExtraTextExts 验文件树过滤与渲染分派共用同一判定：
+// 内置脚本扩展名默认就在树里，自定义扩展名只在配置后出现。
+func TestTreeFilterFollowsExtraTextExts(t *testing.T) {
+	files := map[string]string{
+		"bootstrap.ps1": "Write-Host 'hi'\n",
+		"notes.abc":     "hello\n",
+	}
+	treePaths := func(f *streamFixture) map[string]bool {
+		t.Helper()
+		w := f.fetch(t, "/api/sites/site/tree")
+		if w.Code != http.StatusOK {
+			t.Fatalf("tree status = %d, want 200 (body %q)", w.Code, w.Body.String())
+		}
+		var out struct {
+			Files []struct {
+				Path string `json:"path"`
+			} `json:"files"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+			t.Fatalf("tree decode: %v (body %q)", err, w.Body.String())
+		}
+		paths := make(map[string]bool, len(out.Files))
+		for _, f := range out.Files {
+			paths[f.Path] = true
+		}
+		return paths
+	}
+
+	off := treePaths(newStreamFixture(t, files))
+	if !off["bootstrap.ps1"] {
+		t.Error("without config: tree should list built-in script extension bootstrap.ps1")
+	}
+	if off["notes.abc"] {
+		t.Error("without config: tree should filter out notes.abc (binary)")
+	}
+
+	on := treePaths(newStreamFixtureWithRenderer(t, files, render.New(".abc")))
+	if !on["bootstrap.ps1"] || !on["notes.abc"] {
+		t.Errorf("with config: tree = %v, want both bootstrap.ps1 and notes.abc", on)
 	}
 }
 

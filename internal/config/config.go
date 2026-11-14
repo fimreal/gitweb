@@ -27,7 +27,8 @@ type Config struct {
 type RenderConfig struct {
 	// ExtraTextExts 在内置可渲染文本扩展名表之外追加扩展名，作为纯文本/代码渲染，
 	// 并让 ?raw=1 以 text/plain 返回原始源码。值可带或不带前导点、大小写不敏感。
-	// 默认空，此时行为与未提供本项完全一致。
+	// 默认空 = 不追加任何扩展名（内置表里的七个 Windows 脚本扩展名按文本渲染是
+	// 相对旧版本的有意变化，不因本项为空而回退）。
 	ExtraTextExts []string `yaml:"extra_text_exts"`
 }
 
