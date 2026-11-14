@@ -414,6 +414,11 @@ gitweb/
   每次请求放 `Authorization` 头带到后端；后端用完即弃，**不按 pathid 暂存、不落盘、
   不进日志、不进 List API**。同时写一份 base64 cookie 兜底导航请求。多用户访问同一
   pathid 天然隔离（A 的凭据只在 A 的浏览器里）。
+  - 服务端内容缓存的键混入本次请求实际使用凭据的截断 SHA-256 指纹（匿名请求用固定
+    标记 `anon`），缓存命中路径不再只按 `pathid:ref:filepath` 取内容：私有仓库被带
+    凭据抓取后，同一 TTL 内匿名或不同凭据的请求不会命中该条目，而是重新走上游鉴权
+    （通常得到 401）。凭据原文既不进缓存键，也不进缓存 value（value 始终只是文件
+    字节或渲染片段）。
 - **HTML 用 iframe sandbox 承载**：`.html` 当真实网页显示，但放
   `<iframe sandbox="allow-same-origin">`，公开部署默认不加 `allow-scripts`，
   防不可信仓库的恶意脚本逃逸。
