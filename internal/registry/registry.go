@@ -39,6 +39,9 @@ type Registry struct {
 	store      Store // nil = 纯内存（New() 默认）；非 nil 时 Register/Remove 原子落盘
 	viewsDirty bool  // 浏览数有未落盘的累加；由 flush goroutine 定时写盘
 	stopCh     chan struct{}
+	// authOverlay 是请求期凭据覆盖表（pathid → 凭据），由调用方从 config 的 sites[].auth 构建。
+	// 只在站点自身没带凭据时生效，且永不落盘：state 只存路由数据，重启后由启动流程重新灌入。
+	authOverlay map[string]*Auth
 }
 
 func New() *Registry {
@@ -218,6 +221,15 @@ func (r *Registry) Register(gitURL, pathID, ref string, providerType string, aut
 	return site, nil
 }
 
+// SetAuthOverlay 设置请求期凭据覆盖表（pathid → 凭据），nil 表示清空。
+// 覆盖只在 Get 返回的站点自身 Auth == nil 时生效，且不写回 map、不进 snapshot：
+// state 从不保存凭据，重启后由调用方按 config 重新构建这张表。
+func (r *Registry) SetAuthOverlay(overlay map[string]*Auth) {
+	r.mu.Lock()
+	r.authOverlay = overlay
+	r.mu.Unlock()
+}
+
 func (r *Registry) Get(pathID string) (*Site, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -225,6 +237,15 @@ func (r *Registry) Get(pathID string) (*Site, error) {
 	site, ok := r.sites[pathID]
 	if !ok {
 		return nil, ErrNotFound
+	}
+	if site.Auth == nil {
+		if overlay, ok := r.authOverlay[pathID]; ok {
+			// 返回副本：map 里的站点保持「注册时什么样就是什么样」，
+			// 否则 overlay 会变成一次隐式写状态，后续 Save 的语义也跟着含糊。
+			cp := *site
+			cp.Auth = overlay
+			return &cp, nil
+		}
 	}
 	return site, nil
 }
