@@ -242,8 +242,9 @@ gitweb 是一个用 Go + Gin 实现的轻量服务：给定任意 git 仓库地�
 
 **私有仓库凭据**：在**访问时运行时输入**：viewer 页面探测到远端 401/403（或无凭据的
 404）后提示输入凭据，凭据只存浏览器 `sessionStorage`、随请求 `Authorization` 头带到
-后端、用完即弃。同时同步写一份 base64 cookie 给后端兜底（浏览器导航、`<a>`、
-`<img>`、`iframe src` 不带 `Authorization` 头但带同源 cookie）。详见第 8 节与第 12 节。
+后端；凭据仅用于当前请求，不写入缓存或持久化存储。同时同步写一份 base64 cookie 给
+后端兜底（浏览器导航、`<a>`、`<img>`、`iframe src` 不带 `Authorization` 头但带同源
+cookie）。详见第 8 节与第 12 节。
 
 ## 6. 配置
 
@@ -342,8 +343,8 @@ state 文件：站点注册表 + 浏览数的持久化载体，启动加载、�
   - logout 用 POST（非 GET，防 CSRF）。
 - **凭据保护**（私有仓库运行时凭据）：
   - 主存浏览器 `sessionStorage`；持久化（勾选"记住"）时存 `localStorage` + 过期。
-  - 每次请求经 `Authorization` 头带到后端、用完即弃；后端**不按 pathid 暂存、不落盘、
-    不进日志、不进 List API**。
+  - 每次请求经 `Authorization` 头带到后端；凭据仅用于当前请求，不写入缓存或持久化
+    存储，后端**不按 pathid 暂存、不落盘、不进日志、不进 List API**。
   - **兜底 cookie**：同步写一份 base64 cookie（`gitweb_repo_auth_<pathid>`），供浏览器
     导航（地址栏、`<a>`、`<img>`、`iframe src`）携带——这些请求不带 `Authorization`
     头但带同源 cookie，后端可从 cookie 恢复 auth。cookie 带 `SameSite=Lax`+`Secure`
@@ -411,9 +412,14 @@ gitweb/
 - **私有仓库凭据运行时输入**：不在注册时固定凭据（预置私有仓库除外）。访问页面时
   若仓库无公开访问权限（远端返回 401/403 或无凭据的 404），viewer 页面提示用户输入
   账号密码 / token，凭据只存浏览器 `sessionStorage`（持久化时存 `localStorage`），
-  每次请求放 `Authorization` 头带到后端；后端用完即弃，**不按 pathid 暂存、不落盘、
-  不进日志、不进 List API**。同时写一份 base64 cookie 兜底导航请求。多用户访问同一
-  pathid 天然隔离（A 的凭据只在 A 的浏览器里）。
+  每次请求放 `Authorization` 头带到后端；凭据仅用于当前请求，不写入缓存或持久化存储，
+  **不按 pathid 暂存、不落盘、不进日志、不进 List API**。同时写一份 base64 cookie 兜底
+  导航请求。多用户访问同一 pathid 天然隔离（A 的凭据只在 A 的浏览器里）。
+  - 服务端内容缓存的键混入本次请求实际使用凭据的截断 SHA-256 指纹（匿名请求用固定
+    标记 `anon`），缓存命中路径不再只按 `pathid:ref:filepath` 取内容：私有仓库被带
+    凭据抓取后，同一 TTL 内匿名或不同凭据的请求不会命中该条目，而是重新走上游鉴权
+    （通常得到 401）。凭据原文既不进缓存键，也不进缓存 value（value 始终只是文件
+    字节或渲染片段）。
 - **HTML 用 iframe sandbox 承载**：`.html` 当真实网页显示，但放
   `<iframe sandbox="allow-same-origin">`，公开部署默认不加 `allow-scripts`，
   防不可信仓库的恶意脚本逃逸。

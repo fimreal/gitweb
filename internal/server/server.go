@@ -3,8 +3,10 @@ package server
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -478,7 +480,7 @@ func (s *Server) handleGetTree(c *gin.Context) {
 		return
 	}
 
-	// 凭据从请求头透传（运行时输入，存浏览器 sessionStorage），用完即弃。
+	// 凭据从请求头透传（运行时输入，存浏览器 sessionStorage），仅用于当前请求，不写入缓存或持久化存储。
 	auth := authFromHeader(c, site.Auth)
 
 	// ?ref= 用于 viewer 临时切换分支：覆盖 site.Ref，但不写入 state。
@@ -582,7 +584,7 @@ func (s *Server) handleSiteFile(c *gin.Context) {
 		return
 	}
 
-	// 凭据从请求头透传（运行时输入），不与缓存关联、用完即弃。
+	// 凭据从请求头透传（运行时输入），仅用于当前请求，不写入缓存或持久化存储；只有其哈希指纹参与缓存键隔离。
 	auth := authFromHeader(c, site.Auth)
 
 	// ?ref= 临时切换分支（不写入 state）。缓存键带上 ref，避免不同分支同路径串缓存。
@@ -593,11 +595,12 @@ func (s *Server) handleSiteFile(c *gin.Context) {
 	// ?embed=1 返回独立渲染页面（用于分享链接，只渲染文件内容，无 viewer chrome）。
 	embed := c.Query("embed") == "1"
 
-	// 缓存键不含凭据（凭据可能因用户而异）。缓存的是文件字节/片段，
-	// 公开仓库内容对所有用户一致；私有仓库的内容也按 pathid:filepath 共享缓存——
-	// 若需更严格隔离，可把缓存限定为公开仓库（此处按 YAGNI 暂不区分）。
+	// 缓存键必须隔离凭据：私有仓库一旦被带凭据抓取过，匿名访客若与它共享
+	// pathid:ref:filepath 就会在 TTL 内直接命中缓存拿到内容。键里只放凭据的
+	// 截断 sha256 指纹（authCacheFingerprint），匿名与各凭据互不命中；凭据原文
+	// 既不进键、也不进缓存 value（value 始终只是文件字节或渲染片段）。
 	// raw 模式缓存的是原始字节，和非 raw 的渲染片段不同，需单独缓存。
-	cacheKey := fmt.Sprintf("%s:%s:%s", pathID, ref, filepath)
+	cacheKey := fmt.Sprintf("%s:%s:%s:%s", pathID, ref, filepath, authCacheFingerprint(auth))
 	if raw {
 		cacheKey += ":raw"
 	}
@@ -840,6 +843,24 @@ func (s *Server) serveFetchError(c *gin.Context, err error) {
 		"Code":    502,
 		"Message": "Failed to fetch file: " + err.Error(),
 	})
+}
+
+// authCacheFingerprint 把本次请求实际使用的凭据折叠成缓存键后缀。
+//
+// 键里只放凭据的截断 sha256，原文不进键、也不进缓存 value。匿名请求得到固定
+// 标记 "anon"；站点预置凭据（site.Auth）经 authFromHeader 回退后同样参与指纹。
+// 因此不同用户、以及匿名与任何凭据之间都不会命中彼此的缓存条目。
+func authCacheFingerprint(a *provider.Auth) string {
+	if a == nil {
+		return "anon"
+	}
+	h := sha256.New()
+	// 逐字段加 \x00 分隔，避免「字段拼接相同但切分不同」的歧义。
+	for _, part := range []string{a.Type, a.Token, a.Username, a.Password} {
+		h.Write([]byte(part))
+		h.Write([]byte{0})
+	}
+	return hex.EncodeToString(h.Sum(nil))[:16]
 }
 
 // authFromHeader 从请求的 Authorization 头解析凭据，用于私有仓库运行时鉴权。
