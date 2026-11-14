@@ -36,6 +36,10 @@ var renderableExts = map[string]bool{
 	".sh": true, ".bash": true, ".zsh": true, ".fish": true,
 	".js": true, ".mjs": true, ".cjs": true, ".ts": true, ".jsx": true, ".tsx": true,
 	".py": true, ".rb": true, ".pl": true, ".php": true, ".lua": true, ".vim": true,
+	// Windows 脚本：PowerShell 与批处理/注册表脚本。
+	// 这些类型常用于 `irm <url> | iex` 分发，被判为二进制会让 raw=1 也拿不到文本。
+	".ps1": true, ".psm1": true, ".psd1": true,
+	".bat": true, ".cmd": true, ".reg": true, ".vbs": true,
 	// 编程语言
 	".c": true, ".h": true, ".cpp": true, ".cc": true, ".cxx": true, ".hpp": true,
 	".go": true, ".rs": true, ".java": true, ".kt": true, ".scala": true,
@@ -66,15 +70,31 @@ var textFiles = map[string]bool{
 
 type Renderer struct {
 	md goldmark.Markdown
+	// extraTextExts 是部署方通过配置追加的可渲染文本扩展名（已规范化为小写带点）。
+	// 与 renderableExts 分开存放：内置表保持只读，实例间互不影响，不开配置时行为不变。
+	extraTextExts map[string]bool
 }
 
-func New() *Renderer {
+// New 构造 Renderer。extraTextExts 为追加的可渲染文本扩展名，
+// 取值可带或不带前导点、大小写不敏感；空值与空白项被忽略。
+func New(extraTextExts ...string) *Renderer {
 	md := goldmark.New(
 		goldmark.WithExtensions(extension.GFM, extension.Table, extension.Strikethrough),
 		goldmark.WithParserOptions(parser.WithAutoHeadingID()),
 		goldmark.WithRendererOptions(html.WithUnsafe()),
 	)
-	return &Renderer{md: md}
+	extra := make(map[string]bool, len(extraTextExts))
+	for _, e := range extraTextExts {
+		e = strings.ToLower(strings.TrimSpace(e))
+		if e == "" {
+			continue
+		}
+		if !strings.HasPrefix(e, ".") {
+			e = "." + e
+		}
+		extra[e] = true
+	}
+	return &Renderer{md: md, extraTextExts: extra}
 }
 
 // IsRenderable 报告该文件是否可在 viewer 中预览（文本/图片）。
@@ -101,7 +121,7 @@ func (r *Renderer) Kind(path string) Kind {
 		if imageExts[ext] {
 			return KindImage
 		}
-		if renderableExts[ext] {
+		if r.extraTextExts[ext] || renderableExts[ext] {
 			return KindText
 		}
 		// 有扩展名但不在可渲染表 → 二进制

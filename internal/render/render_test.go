@@ -18,6 +18,14 @@ func TestKind(t *testing.T) {
 		{"a.txt", KindText},
 		{"a.go", KindText},
 		{"a.json", KindText},
+		{"a.ps1", KindText},
+		{"a.psm1", KindText},
+		{"a.psd1", KindText},
+		{"a.bat", KindText},
+		{"a.cmd", KindText},
+		{"a.reg", KindText},
+		{"a.vbs", KindText},
+		{"A.CMD", KindText},
 		{"a.png", KindImage},
 		{"a.svg", KindImage},
 		{"a.exe", KindBinary},
@@ -34,7 +42,7 @@ func TestKind(t *testing.T) {
 
 func TestIsRenderable(t *testing.T) {
 	r := New()
-	renderable := []string{"a.md", "a.html", "a.txt", "a.go", "a.png", "Makefile"}
+	renderable := []string{"a.md", "a.html", "a.txt", "a.go", "a.png", "Makefile", "a.ps1", "a.cmd"}
 	notRenderable := []string{"a.exe", "a.zip", "a.bin"}
 	for _, p := range renderable {
 		if !r.IsRenderable(p) {
@@ -45,6 +53,45 @@ func TestIsRenderable(t *testing.T) {
 		if r.IsRenderable(p) {
 			t.Errorf("IsRenderable(%q) = true, want false", p)
 		}
+	}
+}
+
+// TestExtraTextExts 覆盖配置追加的扩展名：不开配置时未知扩展名仍是二进制，
+// 开启后按文本渲染；取值允许不带前导点、大小写与空白。
+func TestExtraTextExts(t *testing.T) {
+	plain := New()
+	if got := plain.Kind("a.foo"); got != KindBinary {
+		t.Errorf("without config: Kind(a.foo) = %v, want KindBinary", got)
+	}
+
+	r := New(".foo", "BAR", " .baz ")
+	cases := []struct {
+		path string
+		want Kind
+	}{
+		{"a.foo", KindText},
+		{"a.FOO", KindText},
+		{"a.bar", KindText},
+		{"a.baz", KindText},
+		{"a.ps1", KindText},   // 内置表仍然生效
+		{"a.exe", KindBinary}, // 未配置的仍为二进制
+	}
+	for _, c := range cases {
+		if got := r.Kind(c.path); got != c.want {
+			t.Errorf("Kind(%q) = %v, want %v", c.path, got, c.want)
+		}
+	}
+	if !r.IsRenderable("a.foo") {
+		t.Error("IsRenderable(a.foo) = false, want true with extra ext configured")
+	}
+	if plain.IsRenderable("a.foo") {
+		t.Error("extra ext leaked into another renderer instance")
+	}
+
+	// 空白项被忽略，不会因此把所有未知扩展名判为文本。
+	blank := New("", "  ")
+	if got := blank.Kind("a.exe"); got != KindBinary {
+		t.Errorf("blank extra ext: Kind(a.exe) = %v, want KindBinary", got)
 	}
 }
 

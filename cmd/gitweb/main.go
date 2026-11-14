@@ -159,7 +159,7 @@ func main() {
 	}
 
 	cacheMgr := cache.New(cfg.Cache.TTL, cfg.Cache.MaxEntries)
-	renderer := render.New()
+	renderer := render.New(cfg.Render.ExtraTextExts...)
 
 	srv := server.New(reg, providerMgr, cacheMgr, renderer, cfg.BaseURL, cfg.Password)
 

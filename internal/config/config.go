@@ -16,10 +16,19 @@ type Config struct {
 	// 空值（不写这一行、写 ""、或 ${VAR} 未赋值展开成空）一律视为「未配置」，继续向下继承。
 	// config 层刻意不提供关闭持久化的能力：本文件整份会过 os.ExpandEnv，把空串解读成「关掉」
 	// 就等于让一个未赋值的变量静默丢掉全部站点。要关只能用 -state "" 或 GITWEB_STATE=""。
-	StateFile string      `yaml:"state_file"`
-	Cache     CacheConfig `yaml:"cache"`
-	Fetch     FetchConfig `yaml:"fetch"`
-	Sites     []SiteSpec  `yaml:"sites"`
+	StateFile string       `yaml:"state_file"`
+	Cache     CacheConfig  `yaml:"cache"`
+	Fetch     FetchConfig  `yaml:"fetch"`
+	Render    RenderConfig `yaml:"render"`
+	Sites     []SiteSpec   `yaml:"sites"`
+}
+
+// RenderConfig 控制文件渲染分派。
+type RenderConfig struct {
+	// ExtraTextExts 在内置可渲染文本扩展名表之外追加扩展名，作为纯文本/代码渲染，
+	// 并让 ?raw=1 以 text/plain 返回原始源码。值可带或不带前导点、大小写不敏感。
+	// 默认空，此时行为与未提供本项完全一致。
+	ExtraTextExts []string `yaml:"extra_text_exts"`
 }
 
 type CacheConfig struct {

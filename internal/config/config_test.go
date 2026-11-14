@@ -33,6 +33,28 @@ func TestStateFileEmptyMeansUnset(t *testing.T) {
 	}
 }
 
+// render.extra_text_exts 默认空（行为不变），显式配置时按 YAML 列表解析。
+func TestRenderExtraTextExts(t *testing.T) {
+	cfg, err := Load(writeConfig(t, ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Render.ExtraTextExts) != 0 {
+		t.Errorf("default ExtraTextExts = %v, want empty", cfg.Render.ExtraTextExts)
+	}
+
+	cfg, err = Load(writeConfig(t, "render:\n  extra_text_exts: [\".foo\", \"bar\"]\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := len(cfg.Render.ExtraTextExts), 2; got != want {
+		t.Fatalf("ExtraTextExts = %v, want %d entries", cfg.Render.ExtraTextExts, want)
+	}
+	if cfg.Render.ExtraTextExts[0] != ".foo" || cfg.Render.ExtraTextExts[1] != "bar" {
+		t.Errorf("ExtraTextExts = %v, want [.foo bar]", cfg.Render.ExtraTextExts)
+	}
+}
+
 func writeConfig(t *testing.T, extra string) string {
 	t.Helper()
 	path := t.TempDir() + "/config.yaml"

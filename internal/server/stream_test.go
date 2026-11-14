@@ -37,6 +37,12 @@ func (f *streamFixture) fetch(t *testing.T, target string) *httptest.ResponseRec
 // 并把 pathid=site 指向模拟源站，绕开注册接口直接验文件路由。
 func newStreamFixture(t *testing.T, files map[string]string) *streamFixture {
 	t.Helper()
+	return newStreamFixtureWithRenderer(t, files, render.New())
+}
+
+// newStreamFixtureWithRenderer 允许注入带配置的 Renderer（如自定义 extra_text_exts）。
+func newStreamFixtureWithRenderer(t *testing.T, files map[string]string, renderer *render.Renderer) *streamFixture {
+	t.Helper()
 	gin.SetMode(gin.TestMode)
 	gin.DefaultWriter = io.Discard
 	gin.DefaultErrorWriter = io.Discard
@@ -56,7 +62,7 @@ func newStreamFixture(t *testing.T, files map[string]string) *streamFixture {
 
 	reg := registry.New()
 	prov := provider.NewManager(5*time.Second, "", "", []string{"127.0.0.1", "localhost"}, nil, 1<<20, 100)
-	srv := New(reg, prov, cache.New(time.Minute, 16), render.New(), testBaseURL, "")
+	srv := New(reg, prov, cache.New(time.Minute, 16), renderer, testBaseURL, "")
 	if _, err := reg.Register(up.URL+"/o/repo", "site", "main", "gitea", nil, false); err != nil {
 		t.Fatalf("register site: %v", err)
 	}
@@ -97,6 +103,68 @@ func TestStreamedPassthroughCarriesLengthAndHitsCache(t *testing.T) {
 	}
 	if n := f.hits.Load(); n != 1 {
 		t.Errorf("upstream hits = %d, want 1 (second request should come from cache)", n)
+	}
+}
+
+// TestScriptExtensionsServeAsText 锁定 Windows 脚本扩展名的分发契约：
+// 普通浏览页按文本渲染成 <pre><code>，?raw=1 以 text/plain 返回原始源码
+// （否则 `irm <url>?raw=1 | iex` 拿到的是字节流而不是脚本）。
+func TestScriptExtensionsServeAsText(t *testing.T) {
+	ps1 := "Write-Host 'hi'\n$env:FOO = 'bar'\n"
+	cmd := "@echo off\r\necho hi\r\n"
+	f := newStreamFixture(t, map[string]string{"bootstrap.ps1": ps1, "install.cmd": cmd})
+
+	raw := f.fetch(t, "/site/bootstrap.ps1?raw=1")
+	if got := raw.Header().Get("Content-Type"); got != "text/plain; charset=utf-8" {
+		t.Errorf("ps1 raw Content-Type = %q, want text/plain; charset=utf-8", got)
+	}
+	if got := raw.Body.String(); got != ps1 {
+		t.Errorf("ps1 raw body = %q, want %q", got, ps1)
+	}
+
+	view := f.fetch(t, "/site/bootstrap.ps1")
+	if got := view.Header().Get("Content-Type"); got != "text/html; charset=utf-8" {
+		t.Errorf("ps1 view Content-Type = %q, want text/html; charset=utf-8", got)
+	}
+	if got := view.Body.String(); !strings.HasPrefix(got, "<pre><code>") || !strings.Contains(got, "Write-Host") {
+		t.Errorf("ps1 view body = %q, want plain-text rendering", got)
+	}
+
+	cmdRaw := f.fetch(t, "/site/install.cmd?raw=1")
+	if got := cmdRaw.Header().Get("Content-Type"); got != "text/plain; charset=utf-8" {
+		t.Errorf("cmd raw Content-Type = %q, want text/plain; charset=utf-8", got)
+	}
+	if got := cmdRaw.Body.String(); got != cmd {
+		t.Errorf("cmd raw body = %q, want %q", got, cmd)
+	}
+}
+
+// TestConfiguredExtraTextExts 验 render.extra_text_exts 端到端生效：同一扩展名
+// 不开配置时仍是二进制，开启后 raw 与渲染页都走文本路径。
+func TestConfiguredExtraTextExts(t *testing.T) {
+	src := "hello from a custom extension\n"
+	files := map[string]string{"notes.abc": src}
+
+	off := newStreamFixture(t, files)
+	if got := off.fetch(t, "/site/notes.abc?raw=1").Header().Get("Content-Type"); got != "application/octet-stream" {
+		t.Errorf("without config: Content-Type = %q, want application/octet-stream", got)
+	}
+
+	on := newStreamFixtureWithRenderer(t, files, render.New(".abc"))
+	raw := on.fetch(t, "/site/notes.abc?raw=1")
+	if got := raw.Header().Get("Content-Type"); got != "text/plain; charset=utf-8" {
+		t.Errorf("with config: raw Content-Type = %q, want text/plain; charset=utf-8", got)
+	}
+	if got := raw.Body.String(); got != src {
+		t.Errorf("with config: raw body = %q, want %q", got, src)
+	}
+
+	view := on.fetch(t, "/site/notes.abc")
+	if got := view.Header().Get("Content-Type"); got != "text/html; charset=utf-8" {
+		t.Errorf("with config: view Content-Type = %q, want text/html; charset=utf-8", got)
+	}
+	if got := view.Body.String(); !strings.HasPrefix(got, "<pre><code>") || !strings.Contains(got, "custom extension") {
+		t.Errorf("with config: view body = %q, want plain-text rendering", got)
 	}
 }
 
