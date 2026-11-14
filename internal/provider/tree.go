@@ -25,7 +25,7 @@ func (m *Manager) FetchTree(ctx context.Context, providerType, gitURL, ref strin
 		}
 	}
 
-	base := providerBase{allow: m.allow, deny: m.deny, maxSize: m.maxSize}
+	base := m.base(false)
 	switch providerType {
 	case "github":
 		return fetchGitHubTree(ctx, m.client, base, gitURL, ref, auth)
@@ -54,9 +54,7 @@ func fetchGitHubTree(ctx context.Context, client *http.Client, b providerBase, g
 		return nil, err
 	}
 
-	if auth != nil && auth.Token != "" {
-		req.Header.Set("Authorization", "token "+auth.Token)
-	}
+	applyAuth(req, "github", auth)
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -120,9 +118,7 @@ func fetchGitLabTree(ctx context.Context, client *http.Client, b providerBase, g
 		return nil, err
 	}
 
-	if auth != nil && auth.Token != "" {
-		req.Header.Set("PRIVATE-TOKEN", auth.Token)
-	}
+	applyAuth(req, "gitlab", auth)
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -181,11 +177,7 @@ func fetchGiteaTree(ctx context.Context, client *http.Client, b providerBase, gi
 		return nil, err
 	}
 
-	if auth != nil && auth.Token != "" {
-		req.Header.Set("Authorization", "token "+auth.Token)
-	} else if auth != nil && auth.Username != "" {
-		req.SetBasicAuth(auth.Username, auth.Password)
-	}
+	applyAuth(req, "gitea", auth)
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -242,7 +234,7 @@ func (m *Manager) ListBranches(ctx context.Context, providerType, gitURL string,
 		}
 	}
 
-	base := providerBase{allow: m.allow, deny: m.deny, maxSize: m.maxSize}
+	base := m.base(false)
 	switch providerType {
 	case "github":
 		return listGitHubBranches(ctx, m.client, base, gitURL, auth)
@@ -269,9 +261,7 @@ func listGitHubBranches(ctx context.Context, client *http.Client, b providerBase
 	if err != nil {
 		return nil, err
 	}
-	if auth != nil && auth.Token != "" {
-		req.Header.Set("Authorization", "token "+auth.Token)
-	}
+	applyAuth(req, "github", auth)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
@@ -311,9 +301,7 @@ func listGitLabBranches(ctx context.Context, client *http.Client, b providerBase
 	if err != nil {
 		return nil, err
 	}
-	if auth != nil && auth.Token != "" {
-		req.Header.Set("PRIVATE-TOKEN", auth.Token)
-	}
+	applyAuth(req, "gitlab", auth)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
@@ -355,11 +343,7 @@ func listGiteaBranches(ctx context.Context, client *http.Client, b providerBase,
 	if err != nil {
 		return nil, err
 	}
-	if auth != nil && auth.Token != "" {
-		req.Header.Set("Authorization", "token "+auth.Token)
-	} else if auth != nil && auth.Username != "" {
-		req.SetBasicAuth(auth.Username, auth.Password)
-	}
+	applyAuth(req, "gitea", auth)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err

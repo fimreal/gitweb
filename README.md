@@ -181,6 +181,29 @@ curl http://localhost:8080/api/sites/mysite/tree
 
 For private repos, pass credentials via the `Authorization` header (`Bearer <token>`, `token <token>`, or `Basic <base64>`); GitLab also accepts `PRIVATE-TOKEN`. The viewer does this automatically after you enter credentials in the prompt.
 
+### Token scopes
+
+gitweb only reads repositories — it never writes to them — so read-only tokens are enough
+and should be preferred:
+
+| Platform | Read-only scope | Write scope (only needed for pushing from elsewhere) |
+| --- | --- | --- |
+| GitHub | fine-grained: Contents = Read; classic: `repo` (private) / `public_repo` | Contents = Read and write; classic `repo` |
+| GitLab | `read_repository` | `write_repository` |
+| Gitea | `read:repository` | `write:repository` |
+
+A read-only token fetches files normally (200), but a *write* through the same token is
+rejected with **403** — Gitea spells it out as
+`required=[write:repository], token scope=read:repository`. If reads work and a write
+returns 403, check the token scope before suspecting the server; this is the platform
+enforcing least privilege.
+
+Gitea `ref` may be a branch, tag, or commit SHA. Gitea's raw endpoint distinguishes the
+three (`/raw/branch/`, `/raw/tag/`, `/raw/commit/`) and does not resolve a SHA under
+`/raw/branch/`, so gitweb probes branch → tag → commit and caches the resolved form per
+repo/ref. Pinning a site to a tag or SHA therefore works, at the cost of one extra request
+the first time.
+
 ## Usage
 
 After registering a repository with pathid `mysite`:
