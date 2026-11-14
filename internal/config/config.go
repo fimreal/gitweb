@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"time"
 
@@ -35,6 +36,10 @@ type FetchConfig struct {
 	AllowHosts []string      `yaml:"allow_hosts"`
 	DenyHosts  []string      `yaml:"deny_hosts"`
 	RateLimit  int           `yaml:"rate_limit"` // 每分钟每个 host 允许的请求数，默认 100
+	// GitHubBaseURL 非空时启用 GitHub 企业版/自建实例地址（如 https://ghe.example.com）：
+	// 文件走 <base>/{owner}/{repo}/raw/{ref}/{path}，API 走 <base>/api/v3。
+	// 空值 = 公网 github.com：raw 用 raw.githubusercontent.com，API 用 api.github.com。
+	GitHubBaseURL string `yaml:"github_base_url"`
 }
 
 type SiteSpec struct {
@@ -66,7 +71,26 @@ func Load(path string) (*Config, error) {
 	}
 
 	setDefaults(&cfg)
+	if err := cfg.Fetch.validate(); err != nil {
+		return nil, err
+	}
 	return &cfg, nil
+}
+
+// validate 在配置边界拦截会在运行期拼进 URL 的非法值：
+// 一个带路径/查询串的 github_base_url 会让 raw/API 地址静默指向错误位置。
+func (f FetchConfig) validate() error {
+	if f.GitHubBaseURL == "" {
+		return nil
+	}
+	u, err := url.Parse(f.GitHubBaseURL)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return fmt.Errorf("fetch.github_base_url must be an http(s) URL with a host: %q", f.GitHubBaseURL)
+	}
+	if (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "" {
+		return fmt.Errorf("fetch.github_base_url must not contain a path, query or fragment: %q", f.GitHubBaseURL)
+	}
+	return nil
 }
 
 func setDefaults(cfg *Config) {

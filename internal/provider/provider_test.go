@@ -13,7 +13,7 @@ import (
 // newTestManager 创建一个允许 127.0.0.1（httptest）的 Manager，用于模拟远端。
 func newTestManager(t *testing.T, maxSize int64) *Manager {
 	t.Helper()
-	return NewManager(0, "", "", []string{"127.0.0.1", "localhost"}, nil, maxSize, 0)
+	return NewManager(0, "", "", []string{"127.0.0.1", "localhost"}, nil, maxSize, 0, "")
 }
 
 // ----- 纯函数：URL 解析与 SSRF -----
@@ -189,7 +189,7 @@ func TestFetchTooLarge(t *testing.T) {
 
 func TestFetchSSRFBlocked(t *testing.T) {
 	// 不在 allow 列表的私网地址应被拒绝（不发起请求）
-	m := NewManager(0, "", "", nil, nil, 1<<20, 0) // 无 allow，默认拒私网
+	m := NewManager(0, "", "", nil, nil, 1<<20, 0, "") // 无 allow，默认拒私网
 	_, err := m.Fetch(context.Background(), "gitea", "http://127.0.0.1:9/o/repo", "main", "f.txt", nil)
 	if err == nil {
 		t.Fatal("expected SSRF rejection, got nil")
@@ -312,8 +312,8 @@ func TestIdentifyProviderSSRFBlocked(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	m := NewManager(0, "", "", nil, nil, 1<<20, 0) // 无 allow，默认拒私网
-	got := m.IdentifyProvider(srv.URL + "/o/repo") // httptest 是 127.0.0.1
+	m := NewManager(0, "", "", nil, nil, 1<<20, 0, "") // 无 allow，默认拒私网
+	got := m.IdentifyProvider(srv.URL + "/o/repo")     // httptest 是 127.0.0.1
 	if got != "" {
 		t.Fatalf("expected empty (SSRF blocked), got %q", got)
 	}
@@ -484,4 +484,113 @@ func TestCredentialHeaders(t *testing.T) {
 			t.Errorf("basic auth = (%q,%q,%v), want (u,p,true)", user, pass, ok)
 		}
 	})
+}
+
+// ----- GitHub 域名可配置（GHE） -----
+
+func TestGitHubURLBuilders(t *testing.T) {
+	pub := providerBase{}
+	if got, want := pub.githubRaw("github.com", "o", "r", "main", "docs/a.md"), "https://raw.githubusercontent.com/o/r/main/docs/a.md"; got != want {
+		t.Errorf("public raw = %q, want %q", got, want)
+	}
+	if got, want := pub.githubAPI("github.com", "/repos/o/r/branches"), "https://api.github.com/repos/o/r/branches"; got != want {
+		t.Errorf("public api = %q, want %q", got, want)
+	}
+
+	ghe := providerBase{githubBase: "https://ghe.example.com", githubBaseHost: "ghe.example.com"}
+	if got, want := ghe.githubRaw("ghe.example.com", "o", "r", "main", "docs/a.md"), "https://ghe.example.com/o/r/raw/main/docs/a.md"; got != want {
+		t.Errorf("ghe raw = %q, want %q", got, want)
+	}
+	if got, want := ghe.githubAPI("ghe.example.com", "/repos/o/r/branches"), "https://ghe.example.com/api/v3/repos/o/r/branches"; got != want {
+		t.Errorf("ghe api = %q, want %q", got, want)
+	}
+
+	// 配置了 GHE 也不应把公网 github.com 仓库改道到企业版实例。
+	if got, want := ghe.githubRaw("github.com", "o", "r", "main", "a.md"), "https://raw.githubusercontent.com/o/r/main/a.md"; got != want {
+		t.Errorf("mixed public raw = %q, want %q", got, want)
+	}
+	if got, want := ghe.githubAPI("github.com", "/repos/o/r/branches"), "https://api.github.com/repos/o/r/branches"; got != want {
+		t.Errorf("mixed public api = %q, want %q", got, want)
+	}
+}
+
+// TestGitHubConfiguredBaseFetch：配置 github_base_url 后，raw 请求必须打到
+// 配置的 host（而不是公网 raw.githubusercontent.com），且仍带 token 头。
+func TestGitHubConfiguredBaseFetch(t *testing.T) {
+	var gotPath, gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotAuth = r.Header.Get("Authorization")
+		w.Write([]byte("ghe"))
+	}))
+	defer srv.Close()
+
+	m := NewManager(0, "", "", []string{"127.0.0.1", "localhost"}, nil, 1<<20, 0, srv.URL)
+	auth := &Auth{Type: "token", Token: "secret"}
+	got, err := m.Fetch(context.Background(), "github", srv.URL+"/o/repo", "main", "f.txt", auth)
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if string(got) != "ghe" {
+		t.Errorf("body = %q, want ghe", got)
+	}
+	if gotPath != "/o/repo/raw/main/f.txt" {
+		t.Errorf("path = %q, want GHE raw form", gotPath)
+	}
+	if gotAuth != "token secret" {
+		t.Errorf("Authorization = %q, want token secret", gotAuth)
+	}
+}
+
+// TestGitHubConfiguredBaseTreeAndBranches：tree / branches 也必须跟随配置的 API 地址。
+func TestGitHubConfiguredBaseTreeAndBranches(t *testing.T) {
+	var mu sync.Mutex
+	seen := map[string]bool{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		seen[r.URL.Path] = true
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasSuffix(r.URL.Path, "/branches") {
+			w.Write([]byte(`[{"name":"main"},{"name":"dev"}]`))
+			return
+		}
+		w.Write([]byte(`{"tree":[{"path":"a.md","type":"blob","size":3}]}`))
+	}))
+	defer srv.Close()
+
+	m := NewManager(0, "", "", []string{"127.0.0.1", "localhost"}, nil, 1<<20, 0, srv.URL)
+	gitURL := srv.URL + "/o/repo"
+
+	nodes, err := m.FetchTree(context.Background(), "github", gitURL, "main", nil)
+	if err != nil {
+		t.Fatalf("FetchTree: %v", err)
+	}
+	if len(nodes) != 1 || nodes[0].Path != "a.md" {
+		t.Errorf("nodes = %+v, want [a.md]", nodes)
+	}
+	branches, err := m.ListBranches(context.Background(), "github", gitURL, nil)
+	if err != nil {
+		t.Fatalf("ListBranches: %v", err)
+	}
+	if len(branches) != 2 || branches[1] != "dev" {
+		t.Errorf("branches = %v, want [main dev]", branches)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	for _, p := range []string{"/api/v3/repos/o/repo/git/trees/main", "/api/v3/repos/o/repo/branches"} {
+		if !seen[p] {
+			t.Errorf("API path %q not requested; seen=%v", p, seen)
+		}
+	}
+}
+
+// TestIdentifyProviderConfiguredGitHubBase：GHE 的 host 通常不含 "github.com"，
+// 配置了 github_base_url 后应零网络直接识别为 github。
+func TestIdentifyProviderConfiguredGitHubBase(t *testing.T) {
+	m := NewManager(0, "", "", nil, nil, 1<<20, 0, "https://ghe.example.com/")
+	if got := m.IdentifyProvider("https://ghe.example.com/o/repo"); got != "github" {
+		t.Errorf("IdentifyProvider = %q, want github", got)
+	}
 }

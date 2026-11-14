@@ -36,7 +36,7 @@ func newTestServer(t *testing.T, password ...string) (*gin.Engine, *registry.Reg
 	}
 
 	reg := registry.New()
-	prov := provider.NewManager(5*time.Second, "", "", nil, nil, 1<<20, 100)
+	prov := provider.NewManager(5*time.Second, "", "", nil, nil, 1<<20, 100, "")
 	srv := New(reg, prov, cache.New(time.Minute, 16), render.New(), testBaseURL, pw)
 
 	r := srv.SetupRoutes()

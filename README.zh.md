@@ -89,6 +89,10 @@ cache:
 
 fetch:
   timeout: 10s
+  # GitHub Enterprise / 自建 GitHub：填实例根地址，如 https://ghe.example.com。
+  # git_url 指向该 host 的仓库会从 <base>/{owner}/{repo}/raw/{ref}/{path} 取文件，
+  # tree/branches 走 <base>/api/v3；github.com 仓库仍走公网地址。留空 = 公网 github.com。
+  github_base_url: ""
   # SSRF 防护：不匹配 allow/deny 规则的私网主机默认会被拦截。
   allow_hosts: []
   deny_hosts: []

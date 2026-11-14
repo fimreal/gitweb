@@ -154,8 +154,10 @@ gitweb 是一个用 Go + Gin 实现的轻量服务：给定任意 git 仓库地�
   - **不识别 host 直接报错**：未识别 host 不再尝试"通用 raw 模板回退"
     （原 `GenericProvider` 已删除），避免盲目请求任意 host 带来的 SSRF 与滥用风险。
 - 按 host 选择具体 Provider：
-  - **GitHub**：`https://raw.githubusercontent.com/{owner}/{repo}/{ref}/{filepath}`
-    （始终 https，与仓库 host scheme 无关），`Authorization: token` 头。
+  - **GitHub**：公网走 `https://raw.githubusercontent.com/{owner}/{repo}/{ref}/{filepath}`
+    （始终 https，与仓库 host scheme 无关）；配置 `fetch.github_base_url` 后，该 host
+    上的仓库走 `<base>/{owner}/{repo}/raw/{ref}/{filepath}`，tree/branches 走
+    `<base>/api/v3`，github.com 仓库仍走公网地址。凭据头 `Authorization: token`。
   - **GitLab**：API `GET /projects/{id}/repository/files/{path}/raw?ref=`，
     `PRIVATE-TOKEN` 头。
   - **Gitea**：`/{owner}/{repo}/raw/{branch|tag|commit}/{ref}/{filepath}`。
@@ -278,6 +280,7 @@ fetch:
   allow_hosts: []                      # 放行可信自托管内网实例（解析到私网 IP 时必须显式 allow）
   deny_hosts: []
   rate_limit: 100                      # 每分钟每个 host 允许的请求数，默认 100
+  github_base_url: ""                  # GitHub Enterprise 实例根；空 = 公网 github.com
 sites:                                  # 启动时预置站点
   - git_url: https://github.com/username/helloworld
     pathid: mytest
@@ -372,7 +375,8 @@ state 文件：站点注册表 + 浏览数的持久化载体，启动加载、�
     401/403→`ErrAuthRequired`、无凭据 404→`ErrAuthRequired`、有凭据 404→`ErrNotFound`、
     大文件→`ErrTooLarge`、三种 provider 的凭据头、tree、`FilterRenderableFiles`、
     `IdentifyProvider` 探测与缓存。
-  - Provider（mock server）：Gitea ref 三种形式探测与缓存、三种 provider 的凭据头。
+  - Provider（mock server）：Gitea ref 三种形式探测与缓存、GitHub 公网/GHE 的
+    raw 与 API URL 构造、`fetch.github_base_url` 的 host 归属判定。
 - **集成测试**（真实私有仓库凭据不可用时以 mock server 兜底）：用 `httptest` 起模拟
   raw/API 端点，端到端验证拉取 + 渲染 + 缓存 + 401/404/大文件/限流场景；HTTP 层验证
   path 路由、保留前缀、管理 API、密码登录会话、SSRF 拒绝。真实凭据下的

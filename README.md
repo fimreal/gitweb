@@ -91,6 +91,11 @@ cache:
 
 fetch:
   timeout: 10s
+  # GitHub Enterprise / self-hosted GitHub: set the instance root, e.g.
+  # https://ghe.example.com. Repos whose git_url uses that host fetch files from
+  # <base>/{owner}/{repo}/raw/{ref}/{path} and use <base>/api/v3 for tree/branches;
+  # github.com repos keep using the public endpoints. Empty = public github.com.
+  github_base_url: ""
   # SSRF protection: hosts not matching allow/deny rules are blocked if private.
   allow_hosts: []
   deny_hosts: []
