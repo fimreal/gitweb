@@ -89,6 +89,10 @@ cache:
 
 fetch:
   timeout: 10s
+  # GitHub Enterprise / 自建 GitHub：填实例根地址，如 https://ghe.example.com。
+  # git_url 指向该 host 的仓库会从 <base>/{owner}/{repo}/raw/{ref}/{path} 取文件，
+  # tree/branches 走 <base>/api/v3；github.com 仓库仍走公网地址。留空 = 公网 github.com。
+  github_base_url: ""
   # SSRF 防护：不匹配 allow/deny 规则的私网主机默认会被拦截。
   allow_hosts: []
   deny_hosts: []
@@ -173,6 +177,25 @@ curl http://localhost:8080/api/sites/mysite/tree
 ```
 
 对于私有仓库，通过 `Authorization` 请求头传递凭据（`Bearer <token>`、`token <token>` 或 `Basic <base64>`）；GitLab 也支持 `PRIVATE-TOKEN`。在浏览界面输入凭据后，前端会自动处理。
+
+### Token scope
+
+gitweb 只读仓库、从不写入，因此只读 token 就够用，也应该优先使用：
+
+| 平台 | 只读 scope | 写入 scope（仅在别处需要 push 时） |
+| --- | --- | --- |
+| GitHub | fine-grained：Contents = Read；classic：`repo`（私有）/ `public_repo` | Contents = Read and write；classic `repo` |
+| GitLab | `read_repository` | `write_repository` |
+| Gitea | `read:repository` | `write:repository` |
+
+只读 token 取文件正常返回 200，但用同一个 token **写文件**会被拒绝为 **403** —— Gitea 的
+原文是 `required=[write:repository], token scope=read:repository`。如果读得通、写却 403，
+先查 token scope，这是平台在执行最小权限，不是服务端 bug。
+
+Gitea 的 `ref` 支持分支、tag、commit SHA 三种。Gitea raw 端点区分三者
+（`/raw/branch/`、`/raw/tag/`、`/raw/commit/`），且不会在 `/raw/branch/` 下解析 SHA，
+所以 gitweb 按 branch → tag → commit 依次探测，并把解析结果按仓库/ref 缓存。
+因此固定到 tag 或 SHA 的站点可以正常访问，代价只是首次多一次请求。
 
 ## 使用说明
 
