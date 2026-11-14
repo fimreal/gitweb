@@ -127,6 +127,12 @@ Sites added at runtime are persisted to one JSON file so they survive restarts.
 - **Relation to `sites:` in config**: the state file wins. Preset sites are seeded only when
   their path ID / git URL is not already registered, so editing `config.yaml` does not reset
   a live registry.
+- **Preset credentials**: the state file never carries secrets, yet preset private repos keep
+  working across restarts. Preset credentials are written into the in-memory site only at the
+  first seeding; afterwards every request matches the site by **path ID** and overlays the
+  `auth` block of the corresponding `sites[]` entry — state is not rewritten. A preset without
+  an explicit `pathid` gets a random ID at first seeding and can no longer be matched, so give
+  private presets a `pathid`; startup logs a warning when that match is missing.
 
 Two operational traps:
 

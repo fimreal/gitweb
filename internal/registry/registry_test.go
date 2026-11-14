@@ -259,3 +259,132 @@ func TestEnablePersistenceRoundTrip(t *testing.T) {
 		t.Errorf("ListPublic = %d, want 0（hidden 站点不进公开列表）", got)
 	}
 }
+
+// overlay 是请求期凭据覆盖：只补「站点自身没有凭据」的缺口，不覆盖注册时自带的凭据。
+func TestAuthOverlayAppliesOnlyWithoutSiteAuth(t *testing.T) {
+	r := New()
+	if _, err := r.Register("https://github.com/o/private", "plain", "main", "github", nil, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Register("https://github.com/o/other", "own", "main", "github",
+		&Auth{Type: "token", Token: "own-token"}, false); err != nil {
+		t.Fatal(err)
+	}
+
+	r.SetAuthOverlay(map[string]*Auth{
+		"plain": {Type: "token", Token: "overlay-token"},
+		"own":   {Type: "token", Token: "overlay-token"},
+	})
+
+	site, err := r.Get("plain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if site.Auth == nil || site.Auth.Token != "overlay-token" {
+		t.Errorf("plain site Auth = %+v, want overlay-token", site.Auth)
+	}
+
+	own, err := r.Get("own")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if own.Auth == nil || own.Auth.Token != "own-token" {
+		t.Errorf("own site Auth = %+v, want own-token（overlay 不得覆盖注册时自带的凭据）", own.Auth)
+	}
+
+	// overlay 不写回 map：清空后必须回落到注册时的样子。
+	r.SetAuthOverlay(nil)
+	site, err = r.Get("plain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if site.Auth != nil {
+		t.Errorf("Auth = %+v, want nil（overlay 不得写回站点）", site.Auth)
+	}
+}
+
+// overlay 只在请求期生效：即便在设置 overlay 之后再触发一次落盘，state 文件也不得出现凭据，
+// 重新加载的注册表里 Auth 仍为 nil —— 重启后的凭据只能由调用方重新叠加。
+func TestAuthOverlayNotPersisted(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "gitweb.state.json")
+
+	r := New()
+	if err := r.EnablePersistence(path); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Register("https://github.com/o/private", "priv", "main", "github", nil, false); err != nil {
+		t.Fatal(err)
+	}
+	r.SetAuthOverlay(map[string]*Auth{"priv": {Type: "token", Token: "secret-token"}})
+	// 触发一次 Save（SetHidden 立即写盘），确认 overlay 之后的快照也不带凭据。
+	if err := r.SetHidden("priv", true); err != nil {
+		t.Fatal(err)
+	}
+	r.Close()
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "secret-token") {
+		t.Errorf("state file leaked overlay credentials:\n%s", data)
+	}
+
+	r2 := New()
+	if err := r2.EnablePersistence(path); err != nil {
+		t.Fatal(err)
+	}
+	defer r2.Close()
+	site, err := r2.Get("priv")
+	if err != nil {
+		t.Fatalf("site lost across reload: %v", err)
+	}
+	if site.Auth != nil {
+		t.Errorf("Auth = %+v, want nil（overlay 不落盘，重启后须重新叠加）", site.Auth)
+	}
+}
+
+// “overlay 只读”必须真的成立：调用方改传给 SetAuthOverlay 的 map / 凭据，或改 Get 返回站点里的
+// 凭据，都不得影响 registry 内部已生效的 overlay，也不得让注册表里的站点长出凭据（state 不含凭据）。
+func TestGetReturnedAuthIsIsolatedFromOverlay(t *testing.T) {
+	r := New()
+	if _, err := r.Register("https://github.com/o/private", "priv", "main", "github", nil, false); err != nil {
+		t.Fatal(err)
+	}
+
+	overlay := map[string]*Auth{"priv": {Type: "token", Token: "original"}}
+	r.SetAuthOverlay(overlay)
+
+	// 调用方改自己那份：改 token、再从 map 里删掉，都不影响 registry 内部那份。
+	overlay["priv"].Token = "mutated-source"
+	delete(overlay, "priv")
+
+	got, err := r.Get("priv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Auth == nil || got.Auth.Token != "original" {
+		t.Fatalf("Auth after caller mutation = %+v, want original（SetAuthOverlay 必须深复制）", got.Auth)
+	}
+
+	// 改 Get 返回值里的凭据，不得改到全局 overlay。
+	got.Auth.Token = "mutated-return"
+
+	again, err := r.Get("priv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.Auth == nil || again.Auth.Token != "original" {
+		t.Fatalf("Auth after return-value mutation = %+v, want original（Get 必须复制 Auth）", again.Auth)
+	}
+
+	// 注册表里的站点自身始终没有凭据：清空 overlay 后 Auth 回落为 nil。
+	r.SetAuthOverlay(nil)
+	site, err := r.Get("priv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if site.Auth != nil {
+		t.Errorf("Auth = %+v, want nil（overlay 不得写回注册表）", site.Auth)
+	}
+}
