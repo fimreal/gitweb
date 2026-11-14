@@ -480,7 +480,7 @@ func (s *Server) handleGetTree(c *gin.Context) {
 		return
 	}
 
-	// 凭据从请求头透传（运行时输入，存浏览器 sessionStorage），用完即弃。
+	// 凭据从请求头透传（运行时输入，存浏览器 sessionStorage），仅用于当前请求，不写入缓存或持久化存储。
 	auth := authFromHeader(c, site.Auth)
 
 	// ?ref= 用于 viewer 临时切换分支：覆盖 site.Ref，但不写入 state。
@@ -584,7 +584,7 @@ func (s *Server) handleSiteFile(c *gin.Context) {
 		return
 	}
 
-	// 凭据从请求头透传（运行时输入），用完即弃；只有其哈希指纹参与缓存键隔离。
+	// 凭据从请求头透传（运行时输入），仅用于当前请求，不写入缓存或持久化存储；只有其哈希指纹参与缓存键隔离。
 	auth := authFromHeader(c, site.Auth)
 
 	// ?ref= 临时切换分支（不写入 state）。缓存键带上 ref，避免不同分支同路径串缓存。
