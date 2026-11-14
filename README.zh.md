@@ -119,6 +119,10 @@ sites:
   token 与密码只留在浏览器（sessionStorage）里。
 - **与 config 中 `sites:` 的关系**：state 优先。预置站点只在其 pathid / git_url 尚未注册时才补种，
   所以改 `config.yaml` 不会重置一份已经跑起来的注册表。
+- **预置凭据与重启**：state 文件不含凭据，私有预置站点重启后仍能读取。预置凭据只在首次播种时
+  随站点进入内存；之后每次请求按 **pathid** 从 config 的 `sites[]` 里取 `auth` 叠加（overlay），
+  不写回 state。没写 `pathid` 的预置首次播种会拿到随机 id，之后无法再匹配，私有仓库请显式写
+  `pathid`；匹配不到时启动日志会打一条 warn。
 
 两个运维上的坑：
 

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"io/fs"
 	"log"
 	"net/http"
@@ -124,6 +125,11 @@ func main() {
 	providerMgr := provider.NewManager(cfg.Fetch.Timeout, cfg.Fetch.HTTPProxy, cfg.Fetch.HTTPSProxy,
 		cfg.Fetch.AllowHosts, cfg.Fetch.DenyHosts, cfg.Cache.MaxFileSize, cfg.Fetch.RateLimit)
 
+	// 凭据 overlay：state 从不保存凭据，config 的 sites[].auth 在每次请求时按 pathid 叠加回来。
+	// 这是「state 已存在 → 预置站点被跳过」不再等于「私有仓库重启后 401」的关键：
+	// 首次播种把凭据放进内存站点，重启后全靠这张表。
+	reg.SetAuthOverlay(buildAuthOverlay(cfg.Sites))
+
 	for _, siteSpec := range cfg.Sites {
 		// 与已加载的 state 合并：预置站点若已存在则跳过，既不重复也不触发写入。
 		// state 是运行时唯一真相源，config 只补种缺失的预置。
@@ -138,15 +144,7 @@ func main() {
 			continue
 		}
 
-		var auth *registry.Auth
-		if siteSpec.Auth != nil {
-			auth = &registry.Auth{
-				Type:     siteSpec.Auth.Type,
-				Token:    siteSpec.Auth.Token,
-				Username: siteSpec.Auth.Username,
-				Password: siteSpec.Auth.Password,
-			}
-		}
+		auth := toRegistryAuth(siteSpec.Auth)
 
 		providerType := providerMgr.IdentifyProvider(siteSpec.GitURL)
 
@@ -156,6 +154,11 @@ func main() {
 		} else {
 			log.Printf("Registered site: %s -> %s", site.PathID, site.GitURL)
 		}
+	}
+
+	// 播种之后再检查：此时 state 站点与本次注册的预置都已就位，能区分「overlay 命中」与「配了凭据却用不上」。
+	for _, w := range missingAuthWarnings(reg, cfg.Sites) {
+		log.Print(w)
 	}
 
 	cacheMgr := cache.New(cfg.Cache.TTL, cfg.Cache.MaxEntries)
@@ -235,4 +238,60 @@ func resolveStatePath(s statePathSources) string {
 	default:
 		return defaultStatePath
 	}
+}
+
+// toRegistryAuth 把 config 的 auth 转成 registry 的凭据结构；nil 保持 nil。
+func toRegistryAuth(spec *config.AuthSpec) *registry.Auth {
+	if spec == nil {
+		return nil
+	}
+	return &registry.Auth{
+		Type:     spec.Type,
+		Token:    spec.Token,
+		Username: spec.Username,
+		Password: spec.Password,
+	}
+}
+
+// buildAuthOverlay 从 config 的 sites[] 构造请求期凭据覆盖表（pathid → auth）。
+//
+// 匹配键只取 pathid，不取 git_url：
+//   - pathid 是 /{pathid}/ 路由与 state 条目本来的唯一主键，跨重启稳定；
+//   - git_url 会撞车 —— 同一仓库挂多个 ref，或运行期又注册了同址站点时，按 URL 兜底
+//     会让一个没配凭据的站点凭空继承别人条目的 token；
+//   - 没写 pathid 的预置条目无法参与覆盖（播种时拿到随机 id），由 missingAuthWarnings 提示。
+func buildAuthOverlay(specs []config.SiteSpec) map[string]*registry.Auth {
+	overlay := make(map[string]*registry.Auth)
+	for _, spec := range specs {
+		if spec.PathID == "" || spec.Auth == nil {
+			continue
+		}
+		overlay[spec.PathID] = toRegistryAuth(spec.Auth)
+	}
+	return overlay
+}
+
+// missingAuthWarnings 返回「config 里配了凭据、站点却拿不到」的预置条目的告警文案。
+// 写了 pathid 的条目已由 overlay 覆盖；漏网的只有两种情况：预置没写 pathid（首次播种
+// 拿到随机 id，重启后既无法回填也命中不了 overlay），或写的 pathid 与 state 里的条目对不上。
+// 两者在运行时都表现为上游 401，提前一条 warn 比让人对着「私有仓库读不到」排查便宜得多。
+func missingAuthWarnings(reg *registry.Registry, specs []config.SiteSpec) []string {
+	var warnings []string
+	for _, spec := range specs {
+		if spec.Auth == nil {
+			continue
+		}
+		if spec.PathID != "" {
+			if site, err := reg.Get(spec.PathID); err == nil && site.Auth != nil {
+				continue // overlay 命中
+			}
+		}
+		if !reg.HasGitURL(spec.GitURL) {
+			continue // 站点不存在：要么已注册失败，要么还没被播种，别拿它吓人
+		}
+		warnings = append(warnings, fmt.Sprintf(
+			"Warning: %s has auth in config but no registered site matches it by pathid (empty pathid presets get a random id at first seeding); add \"pathid\" to that config entry so the credential overlay can apply",
+			spec.GitURL))
+	}
+	return warnings
 }
