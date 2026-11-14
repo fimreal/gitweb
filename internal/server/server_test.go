@@ -331,3 +331,137 @@ func TestSiteFileCacheIsolatedByCredential(t *testing.T) {
 		t.Fatalf("upstream hits after anonymous fetch = %d, want 2 (anonymous request must not hit the credentialed cache entry)", got)
 	}
 }
+
+// TestSiteFileCachePresetAuthFallback 覆盖站点预置凭据（site.Auth）的回退路径：
+// 匿名请求经 authFromHeader 回退到预置凭据，指纹与显式携带的其他凭据不同，
+// 因此既不能把预置凭据的内容漏给其他凭据，也不能每次匿名访问都打上游。
+func TestSiteFileCachePresetAuthFallback(t *testing.T) {
+	const (
+		wantPath = "/owner/repo/raw/branch/main/private.txt"
+		preset   = "preset-token"
+		content  = "preset protected content"
+	)
+
+	var upstreamHits int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&upstreamHits, 1)
+		if r.URL.Path != wantPath || r.Header.Get("Authorization") != "token "+preset {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = io.WriteString(w, content)
+	}))
+	defer upstream.Close()
+
+	prov := provider.NewManager(5*time.Second, "", "", []string{"127.0.0.1"}, nil, 1<<20, 100)
+	r, reg := newTestServerWithProvider(t, prov, "")
+	if _, err := reg.Register(upstream.URL+"/owner/repo", "priv", "main", "gitea",
+		&registry.Auth{Type: "token", Token: preset}, false); err != nil {
+		t.Fatalf("register site: %v", err)
+	}
+
+	get := func(auth string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "/priv/private.txt", nil)
+		if auth != "" {
+			req.Header.Set("Authorization", "Bearer "+auth)
+		}
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		return w
+	}
+
+	// 1) 匿名请求回退到预置凭据后成功，并按该凭据的指纹入缓存。
+	if w := get(""); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), content) {
+		t.Fatalf("anonymous fetch via preset auth: status %d body %q, want 200 containing %q", w.Code, w.Body.String(), content)
+	}
+
+	// 2) 再次匿名请求命中预置凭据指纹的缓存，不再打上游。
+	if w := get(""); w.Code != http.StatusOK {
+		t.Fatalf("second anonymous fetch: status %d, want 200", w.Code)
+	}
+	if got := atomic.LoadInt32(&upstreamHits); got != 1 {
+		t.Fatalf("upstream hits after two anonymous fetches = %d, want 1 (preset-auth cache not reused)", got)
+	}
+
+	// 3) 显式携带另一凭据：指纹不同，不得命中预置凭据缓存；上游以该凭据收到 404，
+	//    provider 因「带凭据的 404」判定为真实不存在，handler 回 404。
+	w := get("other-token")
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("fetch with other credential: status %d body %q, want 404 — must not hit preset-auth cache", w.Code, w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), content) {
+		t.Fatalf("other credential leaked preset-auth content: %q", w.Body.String())
+	}
+	if got := atomic.LoadInt32(&upstreamHits); got != 2 {
+		t.Fatalf("upstream hits after other-credential fetch = %d, want 2 (must not share preset-auth cache entry)", got)
+	}
+}
+
+// TestSiteCacheInvalidatedAcrossCredentialRefAndRawKeys 验证 DELETE / refresh 的
+// pathid: 前缀失效在新键格式下仍覆盖所有变体：不同凭据指纹、不同 ref、raw 与非 raw。
+func TestSiteCacheInvalidatedAcrossCredentialRefAndRawKeys(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, "content for "+r.URL.Path)
+	}))
+	defer upstream.Close()
+
+	prov := provider.NewManager(5*time.Second, "", "", []string{"127.0.0.1"}, nil, 1<<20, 100)
+	reg := registry.New()
+	c := cache.New(time.Minute, 64)
+	srv := New(reg, prov, c, render.New(), testBaseURL, "")
+	r := srv.SetupRoutes()
+	if _, err := reg.Register(upstream.URL+"/owner/repo", "priv", "main", "gitea", nil, false); err != nil {
+		t.Fatalf("register site: %v", err)
+	}
+
+	fetch := func(auth, target string) {
+		req := httptest.NewRequest(http.MethodGet, target, nil)
+		if auth != "" {
+			req.Header.Set("Authorization", "Bearer "+auth)
+		}
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("GET %s (auth %q): status %d, want 200", target, auth, w.Code)
+		}
+	}
+	// 5 个互不相同的缓存键：tok-a/tok-b/anon × 同文件，tok-a 的 raw 变体，tok-a 的另一 ref。
+	refill := func() {
+		fetch("tok-a", "/priv/a.txt")
+		fetch("tok-b", "/priv/a.txt")
+		fetch("", "/priv/a.txt")
+		fetch("tok-a", "/priv/a.txt?raw=1")
+		fetch("tok-a", "/priv/a.txt?ref=dev")
+	}
+
+	refill()
+	if got := c.Len(); got != 5 {
+		t.Fatalf("cache entries after refill = %d, want 5", got)
+	}
+
+	// refresh：只失效缓存、保留站点。
+	refreshReq := httptest.NewRequest(http.MethodPost, "/api/sites/priv/refresh", nil)
+	refreshW := httptest.NewRecorder()
+	r.ServeHTTP(refreshW, refreshReq)
+	if refreshW.Code != http.StatusOK {
+		t.Fatalf("refresh: status %d, want 200", refreshW.Code)
+	}
+	if got := c.Len(); got != 0 {
+		t.Fatalf("cache entries after refresh = %d, want 0 (all credential/ref/raw variants must be invalidated)", got)
+	}
+
+	// DELETE：同样必须清掉该 pathid 下全部变体。
+	refill()
+	if got := c.Len(); got != 5 {
+		t.Fatalf("cache entries after second refill = %d, want 5", got)
+	}
+	req := httptest.NewRequest(http.MethodDelete, "/api/sites/priv", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("delete: status %d, want 200", w.Code)
+	}
+	if got := c.Len(); got != 0 {
+		t.Fatalf("cache entries after delete = %d, want 0 (all credential/ref/raw variants must be invalidated)", got)
+	}
+}

@@ -11,8 +11,8 @@
    任何人都能注册与访问。滥用由 SSRF 拦截、文件大小限制、缓存容量与拉取超时兜底。
 2. **私有仓库凭据改为运行时输入**：访问页面时若远端返回 401/403，viewer 弹窗提示
    输入 token / 账号密码。凭据只存浏览器 `sessionStorage`，每次请求经 `Authorization`
-   头带到后端、用完即弃，**不落盘、不进日志、不进 List API**。多用户访问同一 pathid
-   天然隔离（凭据只在各自浏览器）。
+   头带到后端；凭据仅用于当前请求，不写入缓存或持久化存储，**不落盘、不进日志、
+   不进 List API**。多用户访问同一 pathid 天然隔离（凭据只在各自浏览器）。
 3. **渲染管线统一为前端 SPA**：viewer.html 是唯一入口；服务端 `wrapContent` 删除，
    `/:pathid/*filepath` 对 md/txt 返回渲染 HTML 片段，html/图片/二进制透传原始字节。
 4. **HTML 用 iframe sandbox 承载**：`<iframe sandbox="allow-same-origin">`（不加
