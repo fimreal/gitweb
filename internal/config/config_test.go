@@ -33,6 +33,37 @@ func TestStateFileEmptyMeansUnset(t *testing.T) {
 	}
 }
 
+// github_base_url 空值 = 公网默认；非空必须是可拼 URL 的站点根，
+// 带路径/查询串的值会让 raw/API 地址静默指向错误位置，必须在加载时拒绝。
+func TestGitHubBaseURL(t *testing.T) {
+	cfg, err := Load(writeConfig(t, ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Fetch.GitHubBaseURL != "" {
+		t.Errorf("GitHubBaseURL = %q, want empty default", cfg.Fetch.GitHubBaseURL)
+	}
+
+	cfg, err = Load(writeConfig(t, "fetch:\n  github_base_url: https://ghe.example.com\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Fetch.GitHubBaseURL != "https://ghe.example.com" {
+		t.Errorf("GitHubBaseURL = %q", cfg.Fetch.GitHubBaseURL)
+	}
+
+	for _, bad := range []string{
+		"ghe.example.com",
+		"ftp://ghe.example.com",
+		"https://ghe.example.com/sub/path",
+		"https://ghe.example.com/?x=1",
+	} {
+		if _, err := Load(writeConfig(t, "fetch:\n  github_base_url: "+bad+"\n")); err == nil {
+			t.Errorf("github_base_url %q: expected validation error, got nil", bad)
+		}
+	}
+}
+
 func writeConfig(t *testing.T, extra string) string {
 	t.Helper()
 	path := t.TempDir() + "/config.yaml"

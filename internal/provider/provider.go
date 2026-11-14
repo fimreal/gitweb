@@ -26,15 +26,50 @@ var (
 // probeTimeout 限制单次 provider 探测的耗时，避免死 host 拖慢注册。
 const probeTimeout = 5 * time.Second
 
+// 公网 GitHub 的默认地址。企业版（GHE）由 fetch.github_base_url 覆盖，
+// 此时 API 走 <base>/api/v3、raw 走 <base>/{owner}/{repo}/raw/{ref}/{path}。
+const (
+	defaultGitHubAPIBase = "https://api.github.com"
+	defaultGitHubRawBase = "https://raw.githubusercontent.com"
+)
+
 // providerBase 各 provider 共享的配置：SSRF 白/黑名单与单文件大小上限。
 type providerBase struct {
 	allow   []string
 	deny    []string
 	maxSize int64
+	// githubBase 非空时表示 GitHub 企业版/自建实例的站点根（不含末尾 /），
+	// githubBaseHost 是它的 host。只有 git_url 指向该 host 的仓库才走企业版地址，
+	// 同一实例配置下访问公网 github.com 仓库仍走公网默认，互不串台。
+	githubBase     string
+	githubBaseHost string
 	// identity 强制上游不做传输编码。Go 的 client 默认带 Accept-Encoding: gzip，
 	// CDN（如 raw.githubusercontent.com）于是改用 chunked 且**不回 content-length** ——
 	// 流式进度条的分母当场消失。实测同一文件：带 gzip 时长度未知，identity 时精确。
 	identity bool
+}
+
+// useGitHubEnterprise 报告仓库所在 host 是否就是配置的 GitHub 企业版实例。
+func (b providerBase) useGitHubEnterprise(gitHost string) bool {
+	return b.githubBase != "" && b.githubBaseHost != "" && strings.EqualFold(gitHost, b.githubBaseHost)
+}
+
+// githubRaw 生成 GitHub raw 文件 URL。公网与 GHE 的路径形态不同：
+// 公网是 raw.githubusercontent.com/{owner}/{repo}/{ref}/{path}，
+// GHE 是 {base}/{owner}/{repo}/raw/{ref}/{path}。
+func (b providerBase) githubRaw(gitHost, owner, repo, ref, filepath string) string {
+	if b.useGitHubEnterprise(gitHost) {
+		return fmt.Sprintf("%s/%s/%s/raw/%s/%s", b.githubBase, owner, repo, ref, filepath)
+	}
+	return fmt.Sprintf("%s/%s/%s/%s/%s", defaultGitHubRawBase, owner, repo, ref, filepath)
+}
+
+// githubAPI 生成 GitHub REST API URL（path 以 / 开头）。
+func (b providerBase) githubAPI(gitHost, path string) string {
+	if b.useGitHubEnterprise(gitHost) {
+		return b.githubBase + "/api/v3" + path
+	}
+	return defaultGitHubAPIBase + path
 }
 
 // checkSSRF 校验目标 URL 的 host 是否允许访问。
@@ -150,12 +185,14 @@ func hasAuth(a *Auth) bool {
 }
 
 type Manager struct {
-	client     *http.Client
-	sf         singleflight.Group
-	allow      []string
-	deny       []string
-	maxSize    int64
-	probeCache sync.Map // host(string) -> providerType(string)；只缓存正例
+	client         *http.Client
+	sf             singleflight.Group
+	allow          []string
+	deny           []string
+	maxSize        int64
+	githubBase     string   // GitHub 企业版站点根；空 = 只用公网 github.com
+	githubBaseHost string   // githubBase 的 host，用于判断仓库是否属于该实例
+	probeCache     sync.Map // host(string) -> providerType(string)；只缓存正例
 
 	// giteaRefKinds 缓存 Gitea ref 探测结果：host/owner/repo:ref -> branch|tag|commit。
 	// 同一站点的每个文件都要取，不缓存会让 tag/commit ref 的站点每个文件多打两次上游。
@@ -169,7 +206,7 @@ type Manager struct {
 	rateLimiters sync.Map // host(string) -> *rate.Limiter
 }
 
-func NewManager(timeout time.Duration, httpProxy, httpsProxy string, allow, deny []string, maxSize int64, rateLimit int) *Manager {
+func NewManager(timeout time.Duration, httpProxy, httpsProxy string, allow, deny []string, maxSize int64, rateLimit int, githubBaseURL string) *Manager {
 	transport := &http.Transport{}
 
 	// 配置代理
@@ -190,26 +227,38 @@ func NewManager(timeout time.Duration, httpProxy, httpsProxy string, allow, deny
 		rateLimit = 100
 	}
 
+	githubBase := strings.TrimRight(githubBaseURL, "/")
+	githubBaseHost := ""
+	if githubBase != "" {
+		if u, err := url.Parse(githubBase); err == nil {
+			githubBaseHost = u.Host
+		}
+	}
+
 	return &Manager{
 		client: &http.Client{
 			Timeout:   timeout,
 			Transport: transport,
 		},
-		allow:     allow,
-		deny:      deny,
-		maxSize:   maxSize,
-		rateLimit: rateLimit,
-		rateBurst: rateLimit, // burst 与 rate 相同，允许短时间内集中请求
+		allow:          allow,
+		deny:           deny,
+		maxSize:        maxSize,
+		githubBase:     githubBase,
+		githubBaseHost: githubBaseHost,
+		rateLimit:      rateLimit,
+		rateBurst:      rateLimit, // burst 与 rate 相同，允许短时间内集中请求
 	}
 }
 
 // base 构造各 provider 共享的配置。identity 只在流式路径开启。
 func (m *Manager) base(identity bool) providerBase {
 	return providerBase{
-		allow:    m.allow,
-		deny:     m.deny,
-		maxSize:  m.maxSize,
-		identity: identity,
+		allow:          m.allow,
+		deny:           m.deny,
+		maxSize:        m.maxSize,
+		githubBase:     m.githubBase,
+		githubBaseHost: m.githubBaseHost,
+		identity:       identity,
 	}
 }
 
@@ -358,9 +407,11 @@ func (p *GitHubProvider) openFetch(ctx context.Context, gitURL, ref, filepath st
 	if err != nil {
 		return nil, err
 	}
+	_, gitHost, _ := probeHost(gitURL)
 
-	// raw.githubusercontent.com 始终走 https，与仓库所在 host 的 scheme 无关
-	rawURL := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s/%s", owner, repo, ref, filepath)
+	// 仓库所在 host 等于配置的 GHE 实例时走 <base>/{owner}/{repo}/raw/{ref}/{path}，
+	// 否则走公网 raw.githubusercontent.com（始终 https，与仓库 host 的 scheme 无关）。
+	rawURL := p.providerBase.githubRaw(gitHost, owner, repo, ref, filepath)
 	return p.providerBase.open(ctx, p.client, "github", rawURL, auth)
 }
 
@@ -576,6 +627,15 @@ func parseGiteaURL(gitURL string) (scheme, host, owner, repo string, err error) 
 // 探测正例按 host 缓存，避免对同一自托管站点重复探测；探测走 m.client（代理/超时生效），
 // 且每个探测 URL 先过 SSRF 校验。均未命中返回 ""。
 func (m *Manager) IdentifyProvider(gitURL string) string {
+	// 配置了 GitHub 企业版/自建实例时，它的 host 直接识别为 github：
+	// GHE 域名通常不含 "github.com"，靠下面的 API 探测也探不出来（GHE 有 /api/v3，
+	// 但没有 Gitea/GitLab 的 version 端点）。
+	if m.githubBaseHost != "" {
+		if _, host, ok := probeHost(gitURL); ok && strings.EqualFold(host, m.githubBaseHost) {
+			return "github"
+		}
+	}
+
 	// 快速路径：关键字匹配，零网络开销
 	if strings.Contains(gitURL, "github.com") {
 		return "github"

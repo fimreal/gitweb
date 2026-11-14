@@ -122,7 +122,8 @@ func main() {
 		log.Printf("State persistence disabled - registered sites are lost on restart")
 	}
 	providerMgr := provider.NewManager(cfg.Fetch.Timeout, cfg.Fetch.HTTPProxy, cfg.Fetch.HTTPSProxy,
-		cfg.Fetch.AllowHosts, cfg.Fetch.DenyHosts, cfg.Cache.MaxFileSize, cfg.Fetch.RateLimit)
+		cfg.Fetch.AllowHosts, cfg.Fetch.DenyHosts, cfg.Cache.MaxFileSize, cfg.Fetch.RateLimit,
+		cfg.Fetch.GitHubBaseURL)
 
 	for _, siteSpec := range cfg.Sites {
 		// 与已加载的 state 合并：预置站点若已存在则跳过，既不重复也不触发写入。

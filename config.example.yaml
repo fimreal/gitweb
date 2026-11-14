@@ -16,6 +16,11 @@ fetch:
   timeout: 30s
   http_proxy: ""   # e.g., http://10.0.0.1:7890
   https_proxy: ""  # e.g., http://10.0.0.1:7890
+  # GitHub Enterprise / 自建 GitHub：填实例根地址（如 https://ghe.example.com）。
+  # git_url 指向该 host 的仓库：文件走 <base>/{owner}/{repo}/raw/{ref}/{path}，
+  # tree/branches 走 <base>/api/v3；github.com 仓库仍走公网默认地址。
+  # 留空 = 公网 github.com（raw.githubusercontent.com + api.github.com）。
+  github_base_url: ""
   # SSRF: allow/deny wildcards (*.gitea.*). Private/loopback/link-local IPs
   # are blocked by default regardless of these lists.
   # 放行可信的自托管内网实例（其域名解析到私网 IP 时必须显式 allow）：

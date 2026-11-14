@@ -55,7 +55,7 @@ func newStreamFixture(t *testing.T, files map[string]string) *streamFixture {
 	t.Cleanup(up.Close)
 
 	reg := registry.New()
-	prov := provider.NewManager(5*time.Second, "", "", []string{"127.0.0.1", "localhost"}, nil, 1<<20, 100)
+	prov := provider.NewManager(5*time.Second, "", "", []string{"127.0.0.1", "localhost"}, nil, 1<<20, 100, "")
 	srv := New(reg, prov, cache.New(time.Minute, 16), render.New(), testBaseURL, "")
 	if _, err := reg.Register(up.URL+"/o/repo", "site", "main", "gitea", nil, false); err != nil {
 		t.Fatalf("register site: %v", err)
