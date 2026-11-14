@@ -33,7 +33,7 @@ func newTestServer(t *testing.T, password ...string) (*gin.Engine, *registry.Reg
 		pw = password[0]
 	}
 
-	prov := provider.NewManager(5*time.Second, "", "", nil, nil, 1<<20, 100)
+	prov := provider.NewManager(5*time.Second, "", "", nil, nil, 1<<20, 100, "")
 	return newTestServerWithProvider(t, prov, pw)
 }
 
@@ -290,7 +290,7 @@ func TestSiteFileCacheIsolatedByCredential(t *testing.T) {
 	defer upstream.Close()
 
 	// 放行 httptest 的环回地址，否则 SSRF 防护会在请求上游前就拒绝。
-	prov := provider.NewManager(5*time.Second, "", "", []string{"127.0.0.1"}, nil, 1<<20, 100)
+	prov := provider.NewManager(5*time.Second, "", "", []string{"127.0.0.1"}, nil, 1<<20, 100, "")
 	r, reg := newTestServerWithProvider(t, prov, "")
 	if _, err := reg.Register(upstream.URL+"/owner/repo", "priv", "main", "gitea", nil, false); err != nil {
 		t.Fatalf("register site: %v", err)
@@ -353,7 +353,7 @@ func TestSiteFileCachePresetAuthFallback(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	prov := provider.NewManager(5*time.Second, "", "", []string{"127.0.0.1"}, nil, 1<<20, 100)
+	prov := provider.NewManager(5*time.Second, "", "", []string{"127.0.0.1"}, nil, 1<<20, 100, "")
 	r, reg := newTestServerWithProvider(t, prov, "")
 	if _, err := reg.Register(upstream.URL+"/owner/repo", "priv", "main", "gitea",
 		&registry.Auth{Type: "token", Token: preset}, false); err != nil {
@@ -405,7 +405,7 @@ func TestSiteCacheInvalidatedAcrossCredentialRefAndRawKeys(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	prov := provider.NewManager(5*time.Second, "", "", []string{"127.0.0.1"}, nil, 1<<20, 100)
+	prov := provider.NewManager(5*time.Second, "", "", []string{"127.0.0.1"}, nil, 1<<20, 100, "")
 	reg := registry.New()
 	c := cache.New(time.Minute, 64)
 	srv := New(reg, prov, c, render.New(), testBaseURL, "")

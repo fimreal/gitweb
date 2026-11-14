@@ -123,7 +123,8 @@ func main() {
 		log.Printf("State persistence disabled - registered sites are lost on restart")
 	}
 	providerMgr := provider.NewManager(cfg.Fetch.Timeout, cfg.Fetch.HTTPProxy, cfg.Fetch.HTTPSProxy,
-		cfg.Fetch.AllowHosts, cfg.Fetch.DenyHosts, cfg.Cache.MaxFileSize, cfg.Fetch.RateLimit)
+		cfg.Fetch.AllowHosts, cfg.Fetch.DenyHosts, cfg.Cache.MaxFileSize, cfg.Fetch.RateLimit,
+		cfg.Fetch.GitHubBaseURL)
 
 	// 凭据 overlay：state 从不保存凭据，config 的 sites[].auth 在每次请求时按 pathid 叠加回来。
 	// 这是「state 已存在 → 预置站点被跳过」不再等于「私有仓库重启后 401」的关键：

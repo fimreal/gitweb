@@ -154,12 +154,18 @@ gitweb 是一个用 Go + Gin 实现的轻量服务：给定任意 git 仓库地�
   - **不识别 host 直接报错**：未识别 host 不再尝试"通用 raw 模板回退"
     （原 `GenericProvider` 已删除），避免盲目请求任意 host 带来的 SSRF 与滥用风险。
 - 按 host 选择具体 Provider：
-  - **GitHub**：`https://raw.githubusercontent.com/{owner}/{repo}/{ref}/{filepath}`
-    （始终 https，与仓库 host scheme 无关），`Authorization: token` 头。
+  - **GitHub**：公网走 `https://raw.githubusercontent.com/{owner}/{repo}/{ref}/{filepath}`
+    （始终 https，与仓库 host scheme 无关）；配置 `fetch.github_base_url` 后，该 host
+    上的仓库走 `<base>/{owner}/{repo}/raw/{ref}/{filepath}`，tree/branches 走
+    `<base>/api/v3`，github.com 仓库仍走公网地址。凭据头 `Authorization: token`。
   - **GitLab**：API `GET /projects/{id}/repository/files/{path}/raw?ref=`，
     `PRIVATE-TOKEN` 头。
-  - **Gitea**：`/{owner}/{repo}/raw/branch/{ref}/{filepath}`，
-    `Authorization: token` 或 HTTP Basic。
+  - **Gitea**：`/{owner}/{repo}/raw/{branch|tag|commit}/{ref}/{filepath}`。
+    ref 支持分支、tag、commit SHA；三种形式在 raw 端点不可互换（SHA 在
+    `/raw/branch/` 下 404），故按 branch → tag → commit 探测并把正例按
+    `host/owner/repo:ref` 缓存。凭据头 `Authorization: token` 或 HTTP Basic。
+- **凭据头收敛**（`applyAuth`）：取文件、tree、branches 三条路径共用同一实现，
+  差异只在 provider 类型分支（`Authorization: token` / `PRIVATE-TOKEN` / Basic）。
 - **GitHub URL 标准化**（`NormalizeGitHubURL`）：全项目唯一实现，registry/server 复用。
   从浏览器 URL 提取标准 git_url + ref，支持 `/tree/{ref}/path` 与 `/blob/{ref}/path`，
   缺省 ref 为 `main`，scheme 缺省 https。
@@ -170,6 +176,10 @@ gitweb 是一个用 Go + Gin 实现的轻量服务：给定任意 git 仓库地�
   - **404 语义区分**：GitHub/GitLab/Gitea 对私有仓库在无凭据时统一返回 404
     （不泄露仓库存在性）。`hasAuth` 区分：无凭据的 404 → `ErrAuthRequired`（触发
     前端凭据输入）；携带凭据仍 404 → `ErrNotFound`（真实不存在或凭据无权限）。
+  - **Token scope**：本服务只读，推荐只读 token —— GitHub fine-grained Contents=Read
+    （classic `repo`/`public_repo`）、GitLab `read_repository`、Gitea `read:repository`。
+    只读 token 取文件 200，但写文件返回 403（Gitea：`required=[write:repository],
+    token scope=read:repository`），这是平台的最小权限语义，不是服务端故障。
 - **限流**（`getLimiter`）：按远端 host 分桶的令牌桶，默认 100 req/min/host
   （约 6000 req/hour），可配。避免对单一平台过度请求被对方封禁，也避免某平台
   限流影响其他平台。超限返回 `ErrRateLimited`，server 层映射为 HTTP 429。
@@ -271,6 +281,7 @@ fetch:
   allow_hosts: []                      # 放行可信自托管内网实例（解析到私网 IP 时必须显式 allow）
   deny_hosts: []
   rate_limit: 100                      # 每分钟每个 host 允许的请求数，默认 100
+  github_base_url: ""                  # GitHub Enterprise 实例根；空 = 公网 github.com
 sites:                                  # 启动时预置站点
   - git_url: https://github.com/username/helloworld
     pathid: mytest
@@ -363,13 +374,14 @@ state 文件：站点注册表 + 浏览数的持久化载体，启动加载、�
   - Registry：注册/冲突/随机 pathid/校验/保留前缀/删除/`ListPublic` 排除 hidden。
   - Provider：URL 解析、`NormalizeGitHubURL`、SSRF 拒绝（私网/环回）、allow/deny 通配、
     401/403→`ErrAuthRequired`、无凭据 404→`ErrAuthRequired`、有凭据 404→`ErrNotFound`、
-    大文件→`ErrTooLarge`、Gitea token 鉴权头、tree、`FilterRenderableFiles`、
+    大文件→`ErrTooLarge`、三种 provider 的凭据头、tree、`FilterRenderableFiles`、
     `IdentifyProvider` 探测与缓存。
-  - Renderer：`Kind` 分派、`IsRenderable`、md/html/纯文本转义。
-  - Cache：TTL 过期、LRU 驱逐、`Invalidate` 前缀。
-- **集成测试**（待实现）：用 `httptest` 起模拟 raw/API 端点，端到端验证
-  拉取 + 渲染 + 缓存 + 401/404/大文件/限流场景；HTTP 层验证 path 路由、保留前缀、
-  管理 API、密码登录会话、SSRF 拒绝。
+  - Provider（mock server）：Gitea ref 三种形式探测与缓存、GitHub 公网/GHE 的
+    raw 与 API URL 构造、`fetch.github_base_url` 的 host 归属判定。
+- **集成测试**（真实私有仓库凭据不可用时以 mock server 兜底）：用 `httptest` 起模拟
+  raw/API 端点，端到端验证拉取 + 渲染 + 缓存 + 401/404/大文件/限流场景；HTTP 层验证
+  path 路由、保留前缀、管理 API、密码登录会话、SSRF 拒绝。真实凭据下的
+  「只读 token 写文件 403」需人工/环境内验证，CI 不依赖外部凭据。
 - **手动验证清单**：响应式断点、暗黑模式切换与持久化、中英文切换、长文档翻页、
   文件树浮窗停靠/拖拽/吸附、凭据弹窗与持久化。
 
