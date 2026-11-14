@@ -190,7 +190,10 @@ gitweb 是一个用 Go + Gin 实现的轻量服务：给定任意 git 仓库地�
   把"unsupported git provider"这种含糊错误具体化。
 - 约束：拉取超时、单文件大小上限（`io.LimitReader` 读时限制，非读后检查）。
   （原"限制重定向""仅允许 https"尚未实现，见 §8 与未实现清单。）
-- 去重：对相同 `(providerType, gitURL, ref, filepath)` 的并发拉取用 singleflight 合并。
+- 去重：对相同 `(providerType, gitURL, ref, filepath, 凭据指纹)` 的并发拉取用
+  singleflight 合并。指纹与内容缓存键同一实现（`provider.AuthFingerprint`，
+  截断 SHA-256，匿名为固定标记 `anon`）：不同凭据的并发请求互不合并，
+  避免在合并窗口内共享同一次上游抓取结果而交叉返回私有内容；相同凭据仍正常去重。
 
 ### 4.3 Cache（缓存）
 - 进程内内存缓存：`hashicorp/golang-lru/v2` 真 LRU + TTL。
@@ -438,6 +441,9 @@ gitweb/
     凭据抓取后，同一 TTL 内匿名或不同凭据的请求不会命中该条目，而是重新走上游鉴权
     （通常得到 401）。凭据原文既不进缓存键，也不进缓存 value（value 始终只是文件
     字节或渲染片段）。
+  - provider 层 `Fetch` 的 singleflight 合并键同样混入该指纹（同一实现
+    `provider.AuthFingerprint`）：并发跨凭据请求不共享同一次上游抓取结果，
+    匿名请求不会搭上带凭据请求的便车拿到私有内容；相同凭据的并发仍合并去重。
 - **HTML 用 iframe sandbox 承载**：`.html` 当真实网页显示，但放
   `<iframe sandbox="allow-same-origin">`，公开部署默认不加 `allow-scripts`，
   防不可信仓库的恶意脚本逃逸。
