@@ -5,9 +5,11 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // newTestManager 创建一个允许 127.0.0.1（httptest）的 Manager，用于模拟远端。
@@ -196,6 +198,272 @@ func TestFetchSSRFBlocked(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "SSRF") {
 		t.Errorf("expected SSRF error, got %v", err)
+	}
+}
+
+// ----- singleflight 凭据隔离：并发跨凭据不得共享上游结果 -----
+
+// heldUpstream 把 mock 上游的每个请求钉在 handler 里：登记到达身份后阻塞，
+// 直到测试显式 unblock()，没有超时放行。第一路在放行前永不完成，因此第二路
+// 是否并入在途航班只取决于合并键，与调度时序无关：键不含凭据（旧实现）时
+// 第二路必然并入，其身份永远不会到达，waitForArrivals 超时判失败——隔离测试
+// 在旧实现下必然失败；键混入指纹（修复后）时第二路独立成行，两种身份同时
+// 被观察到即证明两路确实同时在途，此时放行再断言各自结果。
+type heldUpstream struct {
+	mu       sync.Mutex
+	arrivals []string
+	release  chan struct{}
+	once     sync.Once
+}
+
+func (h *heldUpstream) arrive(identity string) {
+	h.mu.Lock()
+	h.arrivals = append(h.arrivals, identity)
+	h.mu.Unlock()
+	<-h.release
+}
+
+func (h *heldUpstream) unblock() {
+	h.once.Do(func() { close(h.release) })
+}
+
+func (h *heldUpstream) count() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return len(h.arrivals)
+}
+
+// waitForArrivals 等到每种身份都至少到达一次。按身份而非次数等：匿名 404 会按
+// branch/tag/commit 三种 ref 形式重试（QEST-74），同一身份可能到达多次。
+// 超时是失败判定而非放行兜底——被等的身份若并入在途航班就永远不会到达。
+func (h *heldUpstream) waitForArrivals(t *testing.T, want ...string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		h.mu.Lock()
+		seen := make(map[string]bool, len(h.arrivals))
+		for _, a := range h.arrivals {
+			seen[a] = true
+		}
+		var missing []string
+		for _, w := range want {
+			if !seen[w] {
+				missing = append(missing, w)
+			}
+		}
+		got := append([]string(nil), h.arrivals...)
+		h.mu.Unlock()
+		if len(missing) == 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("upstream arrivals = %q, missing identities %q：缺失身份说明该路并入了在途航班（合并键未隔离凭据）", got, missing)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+// waitRegisteredDup 等到名为 caller 的调用方 goroutine 已登记为在途航班的
+// 重复调用者：x/sync singleflight 的 dup 路径先在锁内 c.dups++、再 c.wg.Wait()
+// （singleflight.go 的 Do），因此同一 goroutine 栈块里同时出现 Do 帧与
+// sync.(*WaitGroup).Wait 帧即证明登记完成——仅有 Do 帧不算（可能尚未取得
+// Group 锁，航班先完成就会另起新航班）。按栈块匹配并锁定调用方函数名，
+// 其他测试或残留 goroutine 不会被误算。轮询条件是确定状态，超时仅用于失败判定。
+func waitRegisteredDup(t *testing.T, caller string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	buf := make([]byte, 1<<20)
+	for {
+		stack := string(buf[:runtime.Stack(buf, true)])
+		for _, block := range strings.Split(stack, "\n\n") {
+			if strings.Contains(block, "singleflight.(*Group).Do(") &&
+				strings.Contains(block, "sync.(*WaitGroup).Wait(") &&
+				strings.Contains(block, caller) {
+				return
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("caller %s not registered as singleflight dup after 5s", caller)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+type fetchResult struct {
+	data []byte
+	err  error
+}
+
+// TestFetchConcurrentCredentialIsolation：相同 provider/URL/ref/path，带凭据与
+// 匿名的两路并发。带凭据的一路必须拿到内容；匿名的一路必须 ErrAuthRequired
+// 且拿不到任何内容——合并键不含凭据时，匿名会复用带凭据请求的上游结果读到
+// 私有内容（或反过来把带凭据的一路拖成未授权）。
+func TestFetchConcurrentCredentialIsolation(t *testing.T) {
+	h := &heldUpstream{release: make(chan struct{})}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h.arrive(r.Header.Get("Authorization"))
+		if r.Header.Get("Authorization") == "token secret" {
+			w.Write([]byte("private content"))
+			return
+		}
+		http.NotFound(w, r) // 私有仓库对匿名统一 404，三种 ref 形式都会试
+	}))
+	defer srv.Close()
+	defer h.unblock() // 失败路径也放行 handler，否则 srv.Close 会一直等在途请求
+
+	m := newTestManager(t, 1<<20)
+	gitURL := srv.URL + "/o/repo"
+	auth := &Auth{Type: "token", Token: "secret"}
+
+	credentialed := make(chan fetchResult, 1)
+	anonymous := make(chan fetchResult, 1)
+	go func() {
+		d, err := m.Fetch(context.Background(), "gitea", gitURL, "main", "f.txt", auth)
+		credentialed <- fetchResult{d, err}
+	}()
+	// 第一路已钉在 handler 里（在途航班确定存在），再放第二路进入 Fetch。
+	h.waitForArrivals(t, "token secret")
+	go func() {
+		d, err := m.Fetch(context.Background(), "gitea", gitURL, "main", "f.txt", nil)
+		anonymous <- fetchResult{d, err}
+	}()
+	// 两种身份同时被观察到才放行：此刻两路确实都在途，并发窗口由构造保证。
+	h.waitForArrivals(t, "token secret", "")
+	h.unblock()
+
+	a := <-credentialed
+	if a.err != nil || string(a.data) != "private content" {
+		t.Fatalf("credentialed fetch = (%q, %v), want private content", a.data, a.err)
+	}
+	b := <-anonymous
+	if !errors.Is(b.err, ErrAuthRequired) || b.data != nil {
+		t.Fatalf("anonymous fetch = (%q, %v), want ErrAuthRequired and no content", b.data, b.err)
+	}
+}
+
+// TestFetchConcurrentDifferentCredentials：两个都有效但不同的凭据并发抓同一
+// 文件，上游按凭据返回不同内容，各路必须拿到自己的那份。
+func TestFetchConcurrentDifferentCredentials(t *testing.T) {
+	h := &heldUpstream{release: make(chan struct{})}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h.arrive(r.Header.Get("Authorization"))
+		switch r.Header.Get("Authorization") {
+		case "token alpha":
+			w.Write([]byte("content-alpha"))
+		case "token beta":
+			w.Write([]byte("content-beta"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	defer h.unblock()
+
+	m := newTestManager(t, 1<<20)
+	gitURL := srv.URL + "/o/repo"
+
+	resA := make(chan fetchResult, 1)
+	resB := make(chan fetchResult, 1)
+	go func() {
+		d, err := m.Fetch(context.Background(), "gitea", gitURL, "main", "f.txt", &Auth{Type: "token", Token: "alpha"})
+		resA <- fetchResult{d, err}
+	}()
+	h.waitForArrivals(t, "token alpha")
+	go func() {
+		d, err := m.Fetch(context.Background(), "gitea", gitURL, "main", "f.txt", &Auth{Type: "token", Token: "beta"})
+		resB <- fetchResult{d, err}
+	}()
+	h.waitForArrivals(t, "token alpha", "token beta")
+	h.unblock()
+
+	if a := <-resA; a.err != nil || string(a.data) != "content-alpha" {
+		t.Fatalf("alpha fetch = (%q, %v), want content-alpha", a.data, a.err)
+	}
+	if b := <-resB; b.err != nil || string(b.data) != "content-beta" {
+		t.Fatalf("beta fetch = (%q, %v), want content-beta", b.data, b.err)
+	}
+}
+
+// mergeTestSecondCaller 是合并测试的第二路调用方；具名是为了让
+// waitRegisteredDup 在运行时栈里把它与其他 goroutine 区分开。
+func mergeTestSecondCaller(m *Manager, gitURL string, auth *Auth, dst chan<- fetchResult) {
+	d, err := m.Fetch(context.Background(), "gitea", gitURL, "main", "f.txt", auth)
+	dst <- fetchResult{d, err}
+}
+
+// TestFetchConcurrentSameCredentialStillMerges：凭据指纹隔离不能把 singleflight
+// 整个废掉——相同凭据的并发请求仍应合并为一次上游调用。
+func TestFetchConcurrentSameCredentialStillMerges(t *testing.T) {
+	h := &heldUpstream{release: make(chan struct{})}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h.arrive(r.Header.Get("Authorization"))
+		if r.Header.Get("Authorization") != "token secret" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Write([]byte("ok"))
+	}))
+	defer srv.Close()
+	defer h.unblock()
+
+	m := newTestManager(t, 1<<20)
+	gitURL := srv.URL + "/o/repo"
+	auth := &Auth{Type: "token", Token: "secret"}
+
+	resA := make(chan fetchResult, 1)
+	resB := make(chan fetchResult, 1)
+	go func() {
+		d, err := m.Fetch(context.Background(), "gitea", gitURL, "main", "f.txt", auth)
+		resA <- fetchResult{d, err}
+	}()
+	h.waitForArrivals(t, "token secret")
+	go mergeTestSecondCaller(m, gitURL, auth, resB)
+	// 第二路并入在途航班后没有上游事件可观察；等它实际登记为航班等待者
+	// （Do 帧 + WaitGroup.Wait 帧，见 waitRegisteredDup）才放行，排除
+	// 「第二路尚未登记、航班先完成另起新航班」造成的 count=2 伪失败。
+	waitRegisteredDup(t, "mergeTestSecondCaller")
+	h.unblock()
+
+	if a := <-resA; a.err != nil || string(a.data) != "ok" {
+		t.Fatalf("first fetch = (%q, %v), want ok", a.data, a.err)
+	}
+	if b := <-resB; b.err != nil || string(b.data) != "ok" {
+		t.Fatalf("second fetch = (%q, %v), want ok", b.data, b.err)
+	}
+	if n := h.count(); n != 1 {
+		t.Errorf("upstream requests = %d, want 1 (same-credential flights must merge)", n)
+	}
+}
+
+// ----- 凭据指纹 -----
+
+func TestAuthFingerprint(t *testing.T) {
+	if got := AuthFingerprint(nil); got != "anon" {
+		t.Errorf("nil auth fingerprint = %q, want anon", got)
+	}
+	a := &Auth{Type: "token", Token: "secret"}
+	fp := AuthFingerprint(a)
+	if fp != AuthFingerprint(a) {
+		t.Error("fingerprint must be stable for the same auth")
+	}
+	if len(fp) != 16 {
+		t.Errorf("fingerprint length = %d, want 16", len(fp))
+	}
+	if strings.Contains(fp, "secret") {
+		t.Error("fingerprint must not contain the raw credential")
+	}
+	if fp == AuthFingerprint(nil) {
+		t.Error("credentialed fingerprint must differ from anon")
+	}
+	if fp == AuthFingerprint(&Auth{Type: "token", Token: "other"}) {
+		t.Error("different tokens must produce different fingerprints")
+	}
+	if fp == AuthFingerprint(&Auth{Type: "basic", Username: "u", Password: "p"}) {
+		t.Error("token and basic credentials must produce different fingerprints")
+	}
+	// 字段切分歧义：「ab|c」与「a|bc」直接拼接相同，指纹必须不同。
+	if AuthFingerprint(&Auth{Type: "ab", Token: "c"}) == AuthFingerprint(&Auth{Type: "a", Token: "bc"}) {
+		t.Error("field-boundary ambiguity must produce different fingerprints")
 	}
 }
 

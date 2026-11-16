@@ -240,7 +240,7 @@ Long plain-text files are paginated client-side.
 
 - **config**: Configuration loading (YAML + env-var interpolation)
 - **registry**: Site registration and lookup (pathid validation, reserved-prefix check)
-- **provider**: Single-file fetching from GitHub/GitLab/Gitea, scheme follows URL, singleflight dedup
+- **provider**: Single-file fetching from GitHub/GitLab/Gitea, scheme follows URL, singleflight dedup (scoped by credential fingerprint)
 - **cache**: In-memory LRU + TTL cache (hashicorp/golang-lru/v2)
 - **render**: Markdown/HTML/text rendering — single source of truth for renderable file types
 - **server**: Gin HTTP server with path routing, SSRF guard, size limits, CSP
@@ -254,7 +254,7 @@ Long plain-text files are paginated client-side.
 - **Rate limiting**: Per-host token bucket limits external Git API calls (default 100 req/min per host, configurable via `fetch.rate_limit`). Prevents abuse and avoids hitting upstream API rate limits (e.g., GitHub's 60 req/hour for unauthenticated requests).
 - **CSP + sandbox**: Viewer pages send a strict Content-Security-Policy; user `.html` is rendered in `<iframe sandbox="allow-same-origin">` (no `allow-scripts`) to stop untrusted scripts.
 - **Credentials**: Only in the browser (sessionStorage), sent per-request via `Authorization`; on the server a credential is used only for the current request — never written to the cache or persistent storage, never logged, and never returned by the list API.
-- **Cache isolation**: The server-side content cache is keyed by a truncated SHA-256 fingerprint of the credentials used for that request (anonymous requests use a fixed `anon` marker), so a private repo fetched with credentials is never served to an anonymous or differently-authenticated visitor from cache within the TTL. Raw credentials appear neither in cache keys nor in cached values.
+- **Cache isolation**: The server-side content cache is keyed by a truncated SHA-256 fingerprint of the credentials used for that request (anonymous requests use a fixed `anon` marker), so a private repo fetched with credentials is never served to an anonymous or differently-authenticated visitor from cache within the TTL. The same fingerprint scopes the provider's singleflight coalescing, so concurrent requests with different credentials never share one upstream fetch result either. Raw credentials appear neither in cache keys nor in cached values.
 
 ## License
 
