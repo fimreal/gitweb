@@ -263,21 +263,27 @@ func (h *heldUpstream) waitForArrivals(t *testing.T, want ...string) {
 	}
 }
 
-// waitInSingleflightDo 等到至少 n 个 goroutine 的调用栈都在 singleflight.Do 内
-// （一个在执行航班函数，其余在等结果）。同凭据合并时第二路不再产生上游请求，
-// 到达事件无法证明它已进入 Do，只能观察运行时栈；轮询条件是确定状态而非睡眠
-// 猜测，超时仅用于失败判定。
-func waitInSingleflightDo(t *testing.T, n int) {
+// waitRegisteredDup 等到名为 caller 的调用方 goroutine 已登记为在途航班的
+// 重复调用者：x/sync singleflight 的 dup 路径先在锁内 c.dups++、再 c.wg.Wait()
+// （singleflight.go 的 Do），因此同一 goroutine 栈块里同时出现 Do 帧与
+// sync.(*WaitGroup).Wait 帧即证明登记完成——仅有 Do 帧不算（可能尚未取得
+// Group 锁，航班先完成就会另起新航班）。按栈块匹配并锁定调用方函数名，
+// 其他测试或残留 goroutine 不会被误算。轮询条件是确定状态，超时仅用于失败判定。
+func waitRegisteredDup(t *testing.T, caller string) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	buf := make([]byte, 1<<20)
 	for {
 		stack := string(buf[:runtime.Stack(buf, true)])
-		if strings.Count(stack, "singleflight.(*Group).Do(") >= n {
-			return
+		for _, block := range strings.Split(stack, "\n\n") {
+			if strings.Contains(block, "singleflight.(*Group).Do(") &&
+				strings.Contains(block, "sync.(*WaitGroup).Wait(") &&
+				strings.Contains(block, caller) {
+				return
+			}
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("goroutines inside singleflight.Do < %d after 5s", n)
+			t.Fatalf("caller %s not registered as singleflight dup after 5s", caller)
 		}
 		time.Sleep(time.Millisecond)
 	}
@@ -378,6 +384,13 @@ func TestFetchConcurrentDifferentCredentials(t *testing.T) {
 	}
 }
 
+// mergeTestSecondCaller 是合并测试的第二路调用方；具名是为了让
+// waitRegisteredDup 在运行时栈里把它与其他 goroutine 区分开。
+func mergeTestSecondCaller(m *Manager, gitURL string, auth *Auth, dst chan<- fetchResult) {
+	d, err := m.Fetch(context.Background(), "gitea", gitURL, "main", "f.txt", auth)
+	dst <- fetchResult{d, err}
+}
+
 // TestFetchConcurrentSameCredentialStillMerges：凭据指纹隔离不能把 singleflight
 // 整个废掉——相同凭据的并发请求仍应合并为一次上游调用。
 func TestFetchConcurrentSameCredentialStillMerges(t *testing.T) {
@@ -404,13 +417,11 @@ func TestFetchConcurrentSameCredentialStillMerges(t *testing.T) {
 		resA <- fetchResult{d, err}
 	}()
 	h.waitForArrivals(t, "token secret")
-	go func() {
-		d, err := m.Fetch(context.Background(), "gitea", gitURL, "main", "f.txt", auth)
-		resB <- fetchResult{d, err}
-	}()
-	// 第二路并入在途航班后没有上游事件可观察，等运行时确认两路都在 Do 里
-	// 才放行，排除「第二路迟到、航班已完成」造成的 count=2 伪失败。
-	waitInSingleflightDo(t, 2)
+	go mergeTestSecondCaller(m, gitURL, auth, resB)
+	// 第二路并入在途航班后没有上游事件可观察；等它实际登记为航班等待者
+	// （Do 帧 + WaitGroup.Wait 帧，见 waitRegisteredDup）才放行，排除
+	// 「第二路尚未登记、航班先完成另起新航班」造成的 count=2 伪失败。
+	waitRegisteredDup(t, "mergeTestSecondCaller")
 	h.unblock()
 
 	if a := <-resA; a.err != nil || string(a.data) != "ok" {
