@@ -306,8 +306,8 @@ func (m *Manager) Fetch(ctx context.Context, providerType, gitURL, ref, filepath
 	}
 
 	// 合并键必须混入凭据指纹：singleflight 会把同 key 的并发请求共享同一次上游
-	// 结果，不含凭据时匿名请求可能搭上带凭据请求的便车拿到私有内容（与 server
-	// 层缓存键同一隔离边界）。相同凭据的并发仍正常合并。
+	// 结果，不含凭据时匿名请求可能复用带凭据请求的上游结果，读到私有内容（与
+	// server 层缓存键同一隔离边界）。相同凭据的并发仍正常合并。
 	key := fmt.Sprintf("%s:%s:%s:%s:%s", providerType, gitURL, ref, filepath, AuthFingerprint(auth))
 
 	v, err, _ := m.sf.Do(key, func() (interface{}, error) {

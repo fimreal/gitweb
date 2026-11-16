@@ -443,7 +443,7 @@ gitweb/
     字节或渲染片段）。
   - provider 层 `Fetch` 的 singleflight 合并键同样混入该指纹（同一实现
     `provider.AuthFingerprint`）：并发跨凭据请求不共享同一次上游抓取结果，
-    匿名请求不会搭上带凭据请求的便车拿到私有内容；相同凭据的并发仍合并去重。
+    匿名请求不会复用带凭据请求的上游结果拿到私有内容；相同凭据的并发仍合并去重。
 - **HTML 用 iframe sandbox 承载**：`.html` 当真实网页显示，但放
   `<iframe sandbox="allow-same-origin">`，公开部署默认不加 `allow-scripts`，
   防不可信仓库的恶意脚本逃逸。
