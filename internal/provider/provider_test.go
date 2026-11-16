@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -202,37 +203,84 @@ func TestFetchSSRFBlocked(t *testing.T) {
 
 // ----- singleflight 凭据隔离：并发跨凭据不得共享上游结果 -----
 
-// requestGate 让 mock 上游把并发请求钉在同一个时间窗口里：每个请求先 arrive()
-// 登记，凑满 2 个即开闸；需要排队的 handler 调 wait() 等开闸或超时兜底。
-// 修复前跨凭据请求被合并成一次上游调用，永远凑不满 2 个，只能靠超时放行——
-// 两路拿到同一份结果，隔离断言必然失败；修复后两路各自成行，立即开闸。
-type requestGate struct {
-	mu   sync.Mutex
-	n    int
-	gate chan struct{}
-	once sync.Once
+// heldUpstream 把 mock 上游的每个请求钉在 handler 里：登记到达身份后阻塞，
+// 直到测试显式 unblock()，没有超时放行。第一路在放行前永不完成，因此第二路
+// 是否并入在途航班只取决于合并键，与调度时序无关：键不含凭据（旧实现）时
+// 第二路必然并入，其身份永远不会到达，waitForArrivals 超时判失败——隔离测试
+// 在旧实现下必然失败；键混入指纹（修复后）时第二路独立成行，两种身份同时
+// 被观察到即证明两路确实同时在途，此时放行再断言各自结果。
+type heldUpstream struct {
+	mu       sync.Mutex
+	arrivals []string
+	release  chan struct{}
+	once     sync.Once
 }
 
-func (g *requestGate) arrive() {
-	g.mu.Lock()
-	g.n++
-	if g.n >= 2 {
-		g.once.Do(func() { close(g.gate) })
+func (h *heldUpstream) arrive(identity string) {
+	h.mu.Lock()
+	h.arrivals = append(h.arrivals, identity)
+	h.mu.Unlock()
+	<-h.release
+}
+
+func (h *heldUpstream) unblock() {
+	h.once.Do(func() { close(h.release) })
+}
+
+func (h *heldUpstream) count() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return len(h.arrivals)
+}
+
+// waitForArrivals 等到每种身份都至少到达一次。按身份而非次数等：匿名 404 会按
+// branch/tag/commit 三种 ref 形式重试（QEST-74），同一身份可能到达多次。
+// 超时是失败判定而非放行兜底——被等的身份若并入在途航班就永远不会到达。
+func (h *heldUpstream) waitForArrivals(t *testing.T, want ...string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		h.mu.Lock()
+		seen := make(map[string]bool, len(h.arrivals))
+		for _, a := range h.arrivals {
+			seen[a] = true
+		}
+		var missing []string
+		for _, w := range want {
+			if !seen[w] {
+				missing = append(missing, w)
+			}
+		}
+		got := append([]string(nil), h.arrivals...)
+		h.mu.Unlock()
+		if len(missing) == 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("upstream arrivals = %q, missing identities %q：缺失身份说明该路并入了在途航班（合并键未隔离凭据）", got, missing)
+		}
+		time.Sleep(time.Millisecond)
 	}
-	g.mu.Unlock()
 }
 
-func (g *requestGate) wait() {
-	select {
-	case <-g.gate:
-	case <-time.After(300 * time.Millisecond):
+// waitInSingleflightDo 等到至少 n 个 goroutine 的调用栈都在 singleflight.Do 内
+// （一个在执行航班函数，其余在等结果）。同凭据合并时第二路不再产生上游请求，
+// 到达事件无法证明它已进入 Do，只能观察运行时栈；轮询条件是确定状态而非睡眠
+// 猜测，超时仅用于失败判定。
+func waitInSingleflightDo(t *testing.T, n int) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	buf := make([]byte, 1<<20)
+	for {
+		stack := string(buf[:runtime.Stack(buf, true)])
+		if strings.Count(stack, "singleflight.(*Group).Do(") >= n {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("goroutines inside singleflight.Do < %d after 5s", n)
+		}
+		time.Sleep(time.Millisecond)
 	}
-}
-
-func (g *requestGate) count() int {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	return g.n
 }
 
 type fetchResult struct {
@@ -242,20 +290,20 @@ type fetchResult struct {
 
 // TestFetchConcurrentCredentialIsolation：相同 provider/URL/ref/path，带凭据与
 // 匿名的两路并发。带凭据的一路必须拿到内容；匿名的一路必须 ErrAuthRequired
-// 且拿不到任何内容——singleflight 合并键不含凭据时，匿名会搭上带凭据请求的
-// 便车读到私有内容（或反过来把带凭据的一路拖成未授权）。
+// 且拿不到任何内容——合并键不含凭据时，匿名会复用带凭据请求的上游结果读到
+// 私有内容（或反过来把带凭据的一路拖成未授权）。
 func TestFetchConcurrentCredentialIsolation(t *testing.T) {
-	g := &requestGate{gate: make(chan struct{})}
+	h := &heldUpstream{release: make(chan struct{})}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		g.arrive()
+		h.arrive(r.Header.Get("Authorization"))
 		if r.Header.Get("Authorization") == "token secret" {
-			g.wait()
 			w.Write([]byte("private content"))
 			return
 		}
 		http.NotFound(w, r) // 私有仓库对匿名统一 404，三种 ref 形式都会试
 	}))
 	defer srv.Close()
+	defer h.unblock() // 失败路径也放行 handler，否则 srv.Close 会一直等在途请求
 
 	m := newTestManager(t, 1<<20)
 	gitURL := srv.URL + "/o/repo"
@@ -267,10 +315,15 @@ func TestFetchConcurrentCredentialIsolation(t *testing.T) {
 		d, err := m.Fetch(context.Background(), "gitea", gitURL, "main", "f.txt", auth)
 		credentialed <- fetchResult{d, err}
 	}()
+	// 第一路已钉在 handler 里（在途航班确定存在），再放第二路进入 Fetch。
+	h.waitForArrivals(t, "token secret")
 	go func() {
 		d, err := m.Fetch(context.Background(), "gitea", gitURL, "main", "f.txt", nil)
 		anonymous <- fetchResult{d, err}
 	}()
+	// 两种身份同时被观察到才放行：此刻两路确实都在途，并发窗口由构造保证。
+	h.waitForArrivals(t, "token secret", "")
+	h.unblock()
 
 	a := <-credentialed
 	if a.err != nil || string(a.data) != "private content" {
@@ -285,10 +338,9 @@ func TestFetchConcurrentCredentialIsolation(t *testing.T) {
 // TestFetchConcurrentDifferentCredentials：两个都有效但不同的凭据并发抓同一
 // 文件，上游按凭据返回不同内容，各路必须拿到自己的那份。
 func TestFetchConcurrentDifferentCredentials(t *testing.T) {
-	g := &requestGate{gate: make(chan struct{})}
+	h := &heldUpstream{release: make(chan struct{})}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		g.arrive()
-		g.wait()
+		h.arrive(r.Header.Get("Authorization"))
 		switch r.Header.Get("Authorization") {
 		case "token alpha":
 			w.Write([]byte("content-alpha"))
@@ -299,6 +351,7 @@ func TestFetchConcurrentDifferentCredentials(t *testing.T) {
 		}
 	}))
 	defer srv.Close()
+	defer h.unblock()
 
 	m := newTestManager(t, 1<<20)
 	gitURL := srv.URL + "/o/repo"
@@ -309,10 +362,13 @@ func TestFetchConcurrentDifferentCredentials(t *testing.T) {
 		d, err := m.Fetch(context.Background(), "gitea", gitURL, "main", "f.txt", &Auth{Type: "token", Token: "alpha"})
 		resA <- fetchResult{d, err}
 	}()
+	h.waitForArrivals(t, "token alpha")
 	go func() {
 		d, err := m.Fetch(context.Background(), "gitea", gitURL, "main", "f.txt", &Auth{Type: "token", Token: "beta"})
 		resB <- fetchResult{d, err}
 	}()
+	h.waitForArrivals(t, "token alpha", "token beta")
+	h.unblock()
 
 	if a := <-resA; a.err != nil || string(a.data) != "content-alpha" {
 		t.Fatalf("alpha fetch = (%q, %v), want content-alpha", a.data, a.err)
@@ -325,10 +381,9 @@ func TestFetchConcurrentDifferentCredentials(t *testing.T) {
 // TestFetchConcurrentSameCredentialStillMerges：凭据指纹隔离不能把 singleflight
 // 整个废掉——相同凭据的并发请求仍应合并为一次上游调用。
 func TestFetchConcurrentSameCredentialStillMerges(t *testing.T) {
-	g := &requestGate{gate: make(chan struct{})}
+	h := &heldUpstream{release: make(chan struct{})}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		g.arrive()
-		g.wait()
+		h.arrive(r.Header.Get("Authorization"))
 		if r.Header.Get("Authorization") != "token secret" {
 			http.NotFound(w, r)
 			return
@@ -336,6 +391,7 @@ func TestFetchConcurrentSameCredentialStillMerges(t *testing.T) {
 		w.Write([]byte("ok"))
 	}))
 	defer srv.Close()
+	defer h.unblock()
 
 	m := newTestManager(t, 1<<20)
 	gitURL := srv.URL + "/o/repo"
@@ -347,10 +403,15 @@ func TestFetchConcurrentSameCredentialStillMerges(t *testing.T) {
 		d, err := m.Fetch(context.Background(), "gitea", gitURL, "main", "f.txt", auth)
 		resA <- fetchResult{d, err}
 	}()
+	h.waitForArrivals(t, "token secret")
 	go func() {
 		d, err := m.Fetch(context.Background(), "gitea", gitURL, "main", "f.txt", auth)
 		resB <- fetchResult{d, err}
 	}()
+	// 第二路并入在途航班后没有上游事件可观察，等运行时确认两路都在 Do 里
+	// 才放行，排除「第二路迟到、航班已完成」造成的 count=2 伪失败。
+	waitInSingleflightDo(t, 2)
+	h.unblock()
 
 	if a := <-resA; a.err != nil || string(a.data) != "ok" {
 		t.Fatalf("first fetch = (%q, %v), want ok", a.data, a.err)
@@ -358,7 +419,7 @@ func TestFetchConcurrentSameCredentialStillMerges(t *testing.T) {
 	if b := <-resB; b.err != nil || string(b.data) != "ok" {
 		t.Fatalf("second fetch = (%q, %v), want ok", b.data, b.err)
 	}
-	if n := g.count(); n != 1 {
+	if n := h.count(); n != 1 {
 		t.Errorf("upstream requests = %d, want 1 (same-credential flights must merge)", n)
 	}
 }
