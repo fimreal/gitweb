@@ -77,8 +77,8 @@ gitweb upgrade
 
 - **Linux/macOS**：rename 原子覆盖旧二进制，运行中的进程不受影响。
 - **Windows**：运行中的可执行文件无法覆盖，先把旧文件 rename 为 `<binary>.old`，再让新文件就位。这*不是*原子操作：第二步失败会回滚旧文件；回滚也失败时保留 `.old` 备份。若升级恰好在两次 rename 之间被中断，原文件名会缺失，恢复方式二选一：
-  1. 直接运行备份：`gitweb.exe.old upgrade` —— 它会先把备份 rename 回原名，再继续本次升级；
-  2. 手动把同目录下的 `gitweb.exe.old` 重命名回 `gitweb.exe`。
+  1. 手动把同目录下的 `gitweb.exe.old` 重命名回 `gitweb.exe` —— 不依赖网络，随时可用；
+  2. 运行备份：`gitweb.exe.old upgrade` —— 本次升级成功时会顺带把备份还原回原名。注意还原发生在下载与校验全部通过之后：升级失败（比如源站上没有可用 release）时不会做任何还原，此时请用方式 1。
 
   升级成功后 `.old` 备份保留到下次升级确认可执行文件存在为止。
 

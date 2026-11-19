@@ -77,8 +77,8 @@ Replacement differs by platform:
 
 - **Linux/macOS**: atomic rename over the old binary; a running process is unaffected.
 - **Windows**: a running executable cannot be overwritten, so the old file is renamed to `<binary>.old` and the new one takes its place. This is *not* atomic. If the second rename fails, the old file is rolled back; if rollback also fails, the `.old` backup is kept. If an upgrade is interrupted between the two renames the original filename is left missing — recover either way:
-  1. Run the backup directly: `gitweb.exe.old upgrade` — it first renames the backup back to the original name, then continues with the upgrade;
-  2. Manually rename `gitweb.exe.old` back to `gitweb.exe` in the same directory.
+  1. Manually rename `gitweb.exe.old` back to `gitweb.exe` in the same directory — works offline, at any time;
+  2. Run the backup: `gitweb.exe.old upgrade` — a successful upgrade also restores the backup to the original name. Note the restore happens only after the download and all verification pass: if the upgrade fails (e.g. no release is available on the source server), nothing is restored — use option 1 in that case.
 
   After a successful upgrade the `.old` backup is kept until the next upgrade confirms the executable exists.
 
