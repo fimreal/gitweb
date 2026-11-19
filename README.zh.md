@@ -63,6 +63,22 @@ docker run -d -p 8080:8080 -v gitweb-state:/data gitweb
 
 访问 `http://localhost:8080` 即可注册仓库。
 
+### 自更新
+
+```bash
+gitweb upgrade
+```
+
+从源仓库所在的 Gitea 实例下载最新 release，原地替换当前二进制。新二进制先通过校验（归档完整性、可执行格式与架构）才会替换旧文件；任何一步失败都保持原文件不动。替换完成后重启 gitweb 即运行新二进制。
+
+发布仓库为私有，需通过环境变量提供 Gitea access token：
+
+```bash
+GITWEB_UPGRADE_TOKEN=<token> gitweb upgrade
+```
+
+该命令只做更新替换，不输出任何版本信息。
+
 ## 配置
 
 完整示例见 `config.example.yaml`。
@@ -224,6 +240,7 @@ Gitea 的 `ref` 支持分支、tag、commit SHA 三种。Gitea raw 端点区分�
 - **cache**：内存 LRU + TTL 缓存（hashicorp/golang-lru/v2）
 - **render**：Markdown/HTML/文本 渲染 —— 可渲染文件类型的唯一判定来源
 - **server**：Gin HTTP 服务器，包含路径路由、SSRF 防护、大小限制、CSP
+- **upgrade**：自更新 —— 从源仓库的 Gitea release 下载，先校验后原子替换二进制
 
 ## 安全
 

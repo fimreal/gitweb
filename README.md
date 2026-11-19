@@ -63,6 +63,22 @@ docker run -d -p 8080:8080 -v gitweb-state:/data gitweb
 
 Visit `http://localhost:8080` to register repositories.
 
+### Self upgrade
+
+```bash
+gitweb upgrade
+```
+
+Downloads the latest release from the source repository's Gitea instance and replaces the current binary in place. The new binary is verified (archive integrity, executable format and architecture) before anything is written over the old one; on any failure the existing binary is left untouched. Restart gitweb afterwards to run the new binary.
+
+The release repository is private, so provide a Gitea access token via environment variable:
+
+```bash
+GITWEB_UPGRADE_TOKEN=<token> gitweb upgrade
+```
+
+The command only upgrades — it never prints version information.
+
 ## Configuration
 
 See `config.example.yaml` for a full example.
@@ -244,6 +260,7 @@ Long plain-text files are paginated client-side.
 - **cache**: In-memory LRU + TTL cache (hashicorp/golang-lru/v2)
 - **render**: Markdown/HTML/text rendering — single source of truth for renderable file types
 - **server**: Gin HTTP server with path routing, SSRF guard, size limits, CSP
+- **upgrade**: Self-update from the source repo's Gitea releases — verify-then-replace, atomic binary swap
 
 ## Security
 
