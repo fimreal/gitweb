@@ -49,12 +49,19 @@ const (
 	maxDownloadSize = 256 << 20
 	// maxChecksumSize 校验和文件只有几十字节。
 	maxChecksumSize = 4 << 10
+	// maxRedirects 显式限制重定向跳数：自定义 CheckRedirect 会覆盖 net/http
+	// 的默认上限，不自己实现的话同源循环会一直转到客户端超时。
+	maxRedirects = 10
 	// minBinarySize 真实可执行文件远大于此；挡住只有头部字段的伪造/截断产物。
 	minBinarySize = 4096
 )
 
 // errCrossOrigin 是重定向/asset 地址跨源或降级时的固定错误，不含目标 URL。
 var errCrossOrigin = errors.New("blocked redirect or asset URL leaving the HTTPS update origin")
+
+// errTooManyRedirects 是跳数封顶的固定错误。两者都是固定文案，
+// 在 doGET 里按 sentinel 透传，不被归类成笼统的 network error。
+var errTooManyRedirects = errors.New("too many redirects")
 
 // Options 控制一次自更新。零值字段取默认；GOOS/GOARCH/ExecutablePath 供测试注入。
 type Options struct {
@@ -89,8 +96,11 @@ func Upgrade(ctx context.Context, opts Options) error {
 	if opts.Client == nil {
 		opts.Client = &http.Client{Timeout: 5 * time.Minute}
 	}
-	// 每一跳重定向都重新校验；跨源/降级直接中止。次数上限沿用 net/http 默认（10）。
+	// 每一跳重定向都重新校验；跨源/降级直接中止，跳数显式封顶。
 	opts.Client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if len(via) >= maxRedirects {
+			return errTooManyRedirects
+		}
 		if !sameOrigin(base, req.URL) {
 			return errCrossOrigin
 		}
@@ -127,6 +137,20 @@ func Upgrade(ctx context.Context, opts Options) error {
 		exePath, err = filepath.EvalSymlinks(exePath)
 		if err != nil {
 			return errors.New("resolve executable path failed")
+		}
+	}
+	// Windows 中断恢复的可达入口：两次 rename 之间中断后原路径已空，用户只能
+	// 启动 .old 备份。此时 os.Executable() 是 .old 自身，安装路径是去掉后缀的
+	// 路径 —— 先把它恢复回去再继续升级，而不是去找不存在的 .old.old。
+	if opts.GOOS == "windows" && strings.HasSuffix(exePath, ".old") {
+		target := strings.TrimSuffix(exePath, ".old")
+		if target != "" {
+			if _, err := os.Stat(target); errors.Is(err, os.ErrNotExist) {
+				if err := renameFn(exePath, target); err != nil {
+					return errors.New("recover the executable from the .old backup failed; rename the .old file back to the original name manually")
+				}
+			}
+			exePath = target
 		}
 	}
 	return replaceBinary(exePath, bin, opts.GOOS)
@@ -171,6 +195,14 @@ func doGET(ctx context.Context, opts Options, rawURL, label string) (*http.Respo
 	}
 	resp, err := opts.Client.Do(req)
 	if err != nil {
+		// 重定向策略的拒绝是固定文案，按 sentinel 透传保留分类；
+		// 其余网络错误不透出底层 url.Error —— 它携带完整 URL（含 release tag）。
+		if errors.Is(err, errCrossOrigin) {
+			return nil, errCrossOrigin
+		}
+		if errors.Is(err, errTooManyRedirects) {
+			return nil, errTooManyRedirects
+		}
 		return nil, fmt.Errorf("%s request failed (network error)", label)
 	}
 	return resp, nil
@@ -201,16 +233,22 @@ func latestAssetURL(ctx context.Context, opts Options, base *url.URL) (assetURL,
 		return "", "", errors.New("parse release response failed")
 	}
 	want := assetName(opts.GOOS, opts.GOARCH)
+	hasChecksum := false
 	for _, a := range rel.Assets {
 		switch a.Name {
 		case want:
 			assetURL = a.BrowserDownloadURL
 		case want + ".sha256":
+			hasChecksum = true
 			checksumURL = a.BrowserDownloadURL
 		}
 	}
 	if assetURL == "" {
 		return "", "", fmt.Errorf("latest release has no asset for %s/%s", opts.GOOS, opts.GOARCH)
+	}
+	// 声明了校验和 asset 却没有下载地址是发布异常，不能静默降级成「无校验和」。
+	if hasChecksum && checksumURL == "" {
+		return "", "", errors.New("checksum asset is present but has no download URL")
 	}
 	// API 返回的地址同样要过同源检查，恶意/被篡改的响应不能把请求引向别处。
 	if u, err := url.Parse(assetURL); err != nil || !sameOrigin(base, u) {
@@ -266,6 +304,25 @@ func verifyChecksum(ctx context.Context, opts Options, base *url.URL, checksumUR
 	return nil
 }
 
+// budgetReader 给解压流加总量预算：tar 解析与末尾排空共用同一份额度，
+// 高压缩比的垃圾条目（gzip 炸弹）不能无限消耗 CPU/时间。
+type budgetReader struct {
+	r         io.Reader
+	remaining int64
+}
+
+func (b *budgetReader) Read(p []byte) (int, error) {
+	if b.remaining <= 0 {
+		return 0, errors.New("archive exceeds decompressed size limit")
+	}
+	if int64(len(p)) > b.remaining {
+		p = p[:b.remaining]
+	}
+	n, err := b.r.Read(p)
+	b.remaining -= int64(n)
+	return n, err
+}
+
 // extractBinary 从 tar.gz 中解出唯一的二进制条目。只按条目基名匹配、
 // 内容写入调用方指定的路径，归档里的路径字段不参与落盘，天然免疫路径穿越。
 // 找到目标后继续读完整个归档：gzip 尾部的 CRC/长度校验只有在流被完整消费时
@@ -278,7 +335,8 @@ func extractBinary(archive []byte, goos string) ([]byte, error) {
 	defer gz.Close()
 	want := binaryName(goos)
 	var bin []byte
-	tr := tar.NewReader(gz)
+	stream := &budgetReader{r: gz, remaining: maxDownloadSize}
+	tr := tar.NewReader(stream)
 	for {
 		hdr, err := tr.Next()
 		if err == io.EOF {
@@ -302,7 +360,7 @@ func extractBinary(archive []byte, goos string) ([]byte, error) {
 		}
 	}
 	// 排空剩余字节，触发 gzip 尾部 CRC32/ISIZE 校验。
-	if _, err := io.Copy(io.Discard, gz); err != nil {
+	if _, err := io.Copy(io.Discard, stream); err != nil {
 		return nil, fmt.Errorf("archive integrity check failed: %w", err)
 	}
 	if bin == nil {
@@ -351,8 +409,11 @@ func verifyELF(bin []byte, goarch string) error {
 	phoff := binary.LittleEndian.Uint64(bin[32:40])
 	phentsize := binary.LittleEndian.Uint16(bin[54:56])
 	phnum := binary.LittleEndian.Uint16(bin[56:58])
-	if phnum == 0 || phentsize < 56 || phoff == 0 ||
-		phoff+uint64(phnum)*uint64(phentsize) > uint64(len(bin)) {
+	// 边界一律用减法形式：phoff + phnum*phentsize 这类无符号加法可被
+	// 畸形头部溢出绕回，随后切片越界 panic。
+	size := uint64(len(bin))
+	if phnum == 0 || phentsize < 56 || phoff == 0 || phoff > size ||
+		uint64(phnum)*uint64(phentsize) > size-phoff {
 		return errors.New("ELF program header table is invalid")
 	}
 	loads := 0
@@ -361,7 +422,7 @@ func verifyELF(bin []byte, goarch string) error {
 		pType := binary.LittleEndian.Uint32(ph[0:4])
 		pOffset := binary.LittleEndian.Uint64(ph[8:16])
 		pFilesz := binary.LittleEndian.Uint64(ph[32:40])
-		if pOffset+pFilesz > uint64(len(bin)) {
+		if pOffset > size || pFilesz > size-pOffset {
 			return errors.New("ELF segment extends past end of file")
 		}
 		if pType == 1 { // PT_LOAD
@@ -466,29 +527,34 @@ var renameFn = os.Rename
 //   - Unix：rename 直接覆盖，原子生效，运行中的进程不受影响；
 //   - Windows：运行中的 exe 无法覆盖也无法删除，但可以 rename ——
 //     先把旧文件挪到 .old，再把新文件 rename 到位。这不是原子操作，
-//     两步之间存在中断窗口，因此：第二步失败会尝试回滚并如实报告回滚结果；
-//     回滚也失败时保留 .old 作为唯一可恢复副本并在错误里给出恢复位置；
-//     启动时发现 exe 缺失而 .old 存在（上次升级中途中断）会先自动恢复。
-//     成功升级后 .old 保留为备份，直到下次升级确认 exe 健在才清理。
+//     两步之间存在中断窗口：第二步失败会尝试回滚并如实报告回滚结果；
+//     回滚也失败时保留 .old 作为唯一可恢复副本。中断后的恢复入口是
+//     启动 .old 备份跑 upgrade（Upgrade 里处理），或人工 rename 回去。
+//     成功升级后 .old 保留为备份，直到下次升级发现 exe 存在才清理。
+//
+// 所有错误都是固定分类文案，不含路径与底层错误：安装目录可能含版本号，
+// PathError 会把 tag 写进日志。备份位置按约定告知 —— 永远是可执行文件
+// 同目录下的 <可执行文件名>.old（README 有写明），不打印具体路径。
 func replaceBinary(exePath string, bin []byte, goos string) error {
 	if goos == "windows" {
 		old := exePath + ".old"
 		if _, err := os.Stat(exePath); errors.Is(err, os.ErrNotExist) {
-			// 上次升级在两次 rename 之间中断：exe 缺失、.old 是唯一副本，先恢复。
+			// exe 缺失而 .old 存在：先尝试恢复（正常 CLI 链路里这一情况
+			// 已由 Upgrade 的 .old 启动入口处理，这里是兜底）。
 			if _, err := os.Stat(old); err == nil {
 				if err := renameFn(old, exePath); err != nil {
-					return fmt.Errorf("executable is missing and recovery from backup failed; restore it manually from %s", old)
+					return errors.New("executable is missing and recovery from the .old backup failed; rename the .old file back to the original name manually")
 				}
 			}
 		} else {
-			// exe 健在，上次遗留的 .old 只是过期备份，可以安全清理。
+			// exe 存在，上次遗留的 .old 只是过期备份，可以安全清理。
 			os.Remove(old)
 		}
 	}
 
 	info, err := os.Stat(exePath)
 	if err != nil {
-		return fmt.Errorf("stat current executable: %w", err)
+		return errors.New("stat current executable failed")
 	}
 	mode := info.Mode().Perm()
 	if mode == 0 {
@@ -497,7 +563,7 @@ func replaceBinary(exePath string, bin []byte, goos string) error {
 
 	tmp, err := os.CreateTemp(filepath.Dir(exePath), ".gitweb-upgrade-*")
 	if err != nil {
-		return fmt.Errorf("create temp file next to executable (need write permission on its directory): %w", err)
+		return errors.New("create temp file next to executable failed (need write permission on its directory)")
 	}
 	tmpName := tmp.Name()
 	writeErr := func() error {
@@ -509,13 +575,13 @@ func replaceBinary(exePath string, bin []byte, goos string) error {
 	}()
 	if writeErr != nil {
 		os.Remove(tmpName)
-		return fmt.Errorf("write new binary: %w", writeErr)
+		return errors.New("write new binary failed")
 	}
 
 	if goos != "windows" {
 		if err := renameFn(tmpName, exePath); err != nil {
 			os.Remove(tmpName)
-			return fmt.Errorf("replace executable: %w", err)
+			return errors.New("replace executable failed")
 		}
 		return nil
 	}
@@ -523,15 +589,15 @@ func replaceBinary(exePath string, bin []byte, goos string) error {
 	old := exePath + ".old"
 	if err := renameFn(exePath, old); err != nil {
 		os.Remove(tmpName)
-		return fmt.Errorf("move current executable aside: %w", err)
+		return errors.New("move current executable aside failed")
 	}
 	if err := renameFn(tmpName, exePath); err != nil {
 		if rbErr := renameFn(old, exePath); rbErr != nil {
-			return fmt.Errorf("replace executable failed and rollback failed; the original binary is preserved at %s — restore it manually: %v", old, rbErr)
+			return errors.New("replace executable failed and rollback failed; the original binary is preserved as the .old file next to the executable — rename it back manually")
 		}
 		os.Remove(tmpName)
-		return fmt.Errorf("replace executable failed; the original binary was restored: %w", err)
+		return errors.New("replace executable failed; the original binary was restored")
 	}
-	// 保留 .old 作为备份；下次升级开头确认 exe 健在后才清理。
+	// 保留 .old 作为备份；下次升级发现 exe 存在后才清理。
 	return nil
 }

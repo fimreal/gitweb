@@ -292,6 +292,12 @@ func TestUpgradeVerificationFailuresKeepOriginal(t *testing.T) {
 	binary.LittleEndian.PutUint32(noLoad[64:68], 2) // PT_DYNAMIC instead of PT_LOAD
 	oobSegment := elfBinary(62)
 	binary.LittleEndian.PutUint64(oobSegment[64+32:64+40], 1<<40) // p_filesz past EOF
+	// CodeReviewer 的溢出复现：phoff + phnum*phentsize 无符号绕回后曾切片 panic。
+	phoffOverflow := elfBinary(62)
+	binary.LittleEndian.PutUint64(phoffOverflow[32:40], ^uint64(0)-15)
+	segOverflow := elfBinary(62)
+	binary.LittleEndian.PutUint64(segOverflow[64+8:64+16], ^uint64(0)-15) // p_offset
+	binary.LittleEndian.PutUint64(segOverflow[64+32:64+40], 32)           // p_filesz，加法绕回
 
 	for _, tc := range []struct {
 		name    string
@@ -307,6 +313,8 @@ func TestUpgradeVerificationFailuresKeepOriginal(t *testing.T) {
 		{"header-only fake elf", tarGz(t, "gitweb", append(elfBinary(62)[:64], make([]byte, 4096-64)...))},
 		{"elf without loadable segment", tarGz(t, "gitweb", noLoad)},
 		{"elf segment past eof", tarGz(t, "gitweb", oobSegment)},
+		{"elf phoff overflow", tarGz(t, "gitweb", phoffOverflow)},
+		{"elf segment offset overflow", tarGz(t, "gitweb", segOverflow)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			srv := newReleaseServer(t, releaseServer{assetFile: "gitweb-linux-amd64.tar.gz", archive: tc.archive})
@@ -606,7 +614,8 @@ func TestUpgradeNetworkErrorsOmitURL(t *testing.T) {
 }
 
 // Windows 回滚注入：第二次 rename 失败 → 回滚成功，原文件恢复；
-// 回滚也失败 → .old 保留为唯一副本，错误给出恢复位置。
+// 回滚也失败 → .old 保留为唯一副本，错误按 .old 命名约定告知备份位置，
+// 但不打印具体路径（安装目录可能含版本号）。
 func TestUpgradeWindowsRollback(t *testing.T) {
 	bin := peBinary(0x8664)
 	srv := newReleaseServer(t, releaseServer{assetFile: "gitweb-windows-amd64.tar.gz", archive: tarGz(t, "gitweb.exe", bin)})
@@ -645,9 +654,13 @@ func TestUpgradeWindowsRollback(t *testing.T) {
 			return realRename(old, new)
 		}
 		err := Upgrade(context.Background(), upgradeOpts(srv, exe, "windows", "amd64"))
-		if err == nil || !strings.Contains(err.Error(), exe+".old") {
-			t.Fatalf("error must point at the recovery copy, got: %v", err)
+		if err == nil || !strings.Contains(err.Error(), ".old") {
+			t.Fatalf("error must mention the .old backup convention, got: %v", err)
 		}
+		if strings.Contains(err.Error(), exe) {
+			t.Fatalf("error leaks the executable path: %v", err)
+		}
+		assertNoVersionLeak(t, err)
 		if _, statErr := os.Stat(exe); !errors.Is(statErr, os.ErrNotExist) {
 			t.Fatal("exe should be missing in this scenario")
 		}
@@ -704,4 +717,189 @@ func TestVerifyBinary(t *testing.T) {
 			t.Errorf("verifyBinary(%s/%s) = %v, want ok=%v", tc.goos, tc.goarch, err, tc.ok)
 		}
 	}
+}
+
+// 同源重定向循环：自定义 CheckRedirect 覆盖了 net/http 默认跳数上限，
+// 必须自己封顶，否则会一直转到客户端超时。
+func TestUpgradeRedirectLoop(t *testing.T) {
+	mux := http.NewServeMux()
+	var srv *httptest.Server
+	mux.HandleFunc("/api/v1/repos/o/r/releases/latest", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{
+			"tag_name": "v9.9.9",
+			"assets": []map[string]string{{
+				"name":                 "gitweb-linux-amd64.tar.gz",
+				"browser_download_url": srv.URL + "/download/v9.9.9/loop",
+			}},
+		})
+	})
+	hops := 0
+	mux.HandleFunc("/download/", func(w http.ResponseWriter, r *http.Request) {
+		hops++
+		http.Redirect(w, r, "/download/v9.9.9/loop", http.StatusFound)
+	})
+	srv = httptest.NewTLSServer(mux)
+	t.Cleanup(srv.Close)
+	exe, _ := writeExe(t, "gitweb")
+
+	err := Upgrade(context.Background(), upgradeOpts(srv, exe, "linux", "amd64"))
+	if err == nil || !strings.Contains(err.Error(), "too many redirects") {
+		t.Fatalf("expected redirect cap error, got: %v", err)
+	}
+	if hops > maxRedirects+1 {
+		t.Fatalf("redirect cap not enforced: %d hops", hops)
+	}
+	assertNoVersionLeak(t, err)
+	assertExeUntouched(t, exe)
+}
+
+// gzip 炸弹：压缩体积很小、解压后远超预算的归档必须被解压总量上限挡住。
+func TestUpgradeGzipBomb(t *testing.T) {
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	if err := tw.WriteHeader(&tar.Header{Name: "junk", Mode: 0o644, Size: 300 << 20, Typeflag: tar.TypeReg}); err != nil {
+		t.Fatal(err)
+	}
+	zeros := make([]byte, 1<<20)
+	for i := 0; i < 300; i++ {
+		if _, err := tw.Write(zeros); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := newReleaseServer(t, releaseServer{assetFile: "gitweb-linux-amd64.tar.gz", archive: buf.Bytes()})
+	exe, _ := writeExe(t, "gitweb")
+	err := Upgrade(context.Background(), upgradeOpts(srv, exe, "linux", "amd64"))
+	if err == nil || !strings.Contains(err.Error(), "decompressed size limit") {
+		t.Fatalf("expected decompressed size limit error, got: %v", err)
+	}
+	assertNoVersionLeak(t, err)
+	assertExeUntouched(t, exe)
+}
+
+// 声明了 <asset>.sha256 却没有下载地址：发布异常，必须报错而不是当作无校验和。
+func TestUpgradeChecksumAssetWithoutURL(t *testing.T) {
+	mux := http.NewServeMux()
+	var srv *httptest.Server
+	mux.HandleFunc("/api/v1/repos/o/r/releases/latest", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{
+			"tag_name": "v9.9.9",
+			"assets": []map[string]string{
+				{"name": "gitweb-linux-amd64.tar.gz", "browser_download_url": srv.URL + "/download/v9.9.9/asset"},
+				{"name": "gitweb-linux-amd64.tar.gz.sha256", "browser_download_url": ""},
+			},
+		})
+	})
+	srv = httptest.NewTLSServer(mux)
+	t.Cleanup(srv.Close)
+	exe, _ := writeExe(t, "gitweb")
+
+	err := Upgrade(context.Background(), upgradeOpts(srv, exe, "linux", "amd64"))
+	if err == nil || !strings.Contains(err.Error(), "no download URL") {
+		t.Fatalf("expected checksum-without-URL error, got: %v", err)
+	}
+	assertNoVersionLeak(t, err)
+	assertExeUntouched(t, exe)
+}
+
+// Windows 中断后的可达恢复入口：原路径已空，用户启动的是 .old 备份本身。
+// Upgrade 必须先把 .old rename 回原名，再把新二进制装到原名位置。
+func TestUpgradeWindowsOldBootRecovery(t *testing.T) {
+	bin := peBinary(0x8664)
+	srv := newReleaseServer(t, releaseServer{assetFile: "gitweb-windows-amd64.tar.gz", archive: tarGz(t, "gitweb.exe", bin)})
+	exe, dir := writeExe(t, "gitweb.exe")
+	if err := os.Rename(exe, exe+".old"); err != nil {
+		t.Fatal(err)
+	}
+
+	// 模拟从 .old 启动：os.Executable() 会解析到 .old 自身。
+	if err := Upgrade(context.Background(), upgradeOpts(srv, exe+".old", "windows", "amd64")); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(exe)
+	if err != nil || !bytes.Equal(got, bin) {
+		t.Fatalf("original path should hold the new binary: %v", err)
+	}
+	backup, err := os.ReadFile(exe + ".old")
+	if err != nil || string(backup) != "old binary" {
+		t.Fatalf(".old should hold the recovered previous binary: %q, %v", backup, err)
+	}
+	entries, _ := os.ReadDir(dir)
+	if len(entries) != 2 {
+		t.Fatalf("unexpected dir contents: %v", entries)
+	}
+}
+
+// 安装目录含版本号时，文件系统错误不得经 PathError 把目录名/tag 带进日志。
+func TestUpgradeFSErrorsOmitVersionedPath(t *testing.T) {
+	bin := peBinary(0x8664)
+	srv := newReleaseServer(t, releaseServer{assetFile: "gitweb-windows-amd64.tar.gz", archive: tarGz(t, "gitweb.exe", bin)})
+	realRename := os.Rename
+	t.Cleanup(func() { renameFn = realRename })
+
+	versionedExe := func(t *testing.T) string {
+		t.Helper()
+		dir := filepath.Join(t.TempDir(), "gitweb-v9.9.9")
+		if err := os.Mkdir(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		exe := filepath.Join(dir, "gitweb.exe")
+		if err := os.WriteFile(exe, []byte("old binary"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		return exe
+	}
+	assertNoPathLeak := func(t *testing.T, err error, exe string) {
+		t.Helper()
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		msg := err.Error()
+		if strings.Contains(msg, exe) || strings.Contains(msg, filepath.Dir(exe)) || strings.Contains(msg, "gitweb-v9.9.9") {
+			t.Fatalf("error leaks versioned install path: %v", err)
+		}
+		assertNoVersionLeak(t, err)
+	}
+
+	t.Run("stat failure", func(t *testing.T) {
+		exe := filepath.Join(filepath.Dir(versionedExe(t)), "missing.exe")
+		err := Upgrade(context.Background(), upgradeOpts(srv, exe, "windows", "amd64"))
+		assertNoPathLeak(t, err, exe)
+	})
+
+	t.Run("rename failure unix", func(t *testing.T) {
+		exe := versionedExe(t)
+		renameFn = func(old, new string) error { return errors.New("injected") }
+		err := Upgrade(context.Background(), upgradeOpts(srv, exe, "linux", "amd64"))
+		assertNoPathLeak(t, err, exe)
+		assertExeUntouched(t, exe)
+	})
+
+	t.Run("rollback failure windows", func(t *testing.T) {
+		exe := versionedExe(t)
+		calls := 0
+		renameFn = func(old, new string) error {
+			calls++
+			if calls >= 2 {
+				return errors.New("injected")
+			}
+			return realRename(old, new)
+		}
+		err := Upgrade(context.Background(), upgradeOpts(srv, exe, "windows", "amd64"))
+		assertNoPathLeak(t, err, exe)
+		if !strings.Contains(err.Error(), ".old") {
+			t.Fatalf("error must mention the .old backup convention: %v", err)
+		}
+		backup, readErr := os.ReadFile(exe + ".old")
+		if readErr != nil || string(backup) != "old binary" {
+			t.Fatalf(".old must survive as the only recoverable copy: %q, %v", backup, readErr)
+		}
+	})
 }
