@@ -69,7 +69,16 @@ Visit `http://localhost:8080` to register repositories.
 gitweb upgrade
 ```
 
-Downloads the latest release from the source repository's Gitea instance and replaces the current binary in place. The new binary is verified (archive integrity, executable format and architecture) before anything is written over the old one; on any failure the existing binary is left untouched. Restart gitweb afterwards to run the new binary.
+Downloads the latest release from the source repository's Gitea instance and replaces the current binary. The update channel is HTTPS-only: the API request, the asset download and every redirect hop must stay on the exact same origin (scheme, host and port); downgrades and cross-origin targets are rejected.
+
+Before replacement the download is verified: full archive integrity (the gzip checksum is always checked), executable format, architecture and header-table bounds. If the release publishes a `<asset>.sha256` checksum asset it is verified as well; without one, verification covers integrity and format but not publisher authenticity. Any download or verification failure leaves the existing binary untouched.
+
+Replacement differs by platform:
+
+- **Linux/macOS**: atomic rename over the old binary; a running process is unaffected.
+- **Windows**: a running executable cannot be overwritten, so the old file is renamed to `<binary>.old` and the new one takes its place. This is *not* atomic. If the second rename fails, the old file is rolled back; if rollback also fails, the `.old` backup is kept and the error reports where to restore it from. An upgrade interrupted between the two renames is recovered automatically at the start of the next run. After a successful upgrade the `.old` backup is kept until the next upgrade confirms the executable is healthy.
+
+Restart gitweb afterwards to run the new binary.
 
 The release repository is private, so provide a Gitea access token via environment variable:
 
@@ -260,7 +269,7 @@ Long plain-text files are paginated client-side.
 - **cache**: In-memory LRU + TTL cache (hashicorp/golang-lru/v2)
 - **render**: Markdown/HTML/text rendering — single source of truth for renderable file types
 - **server**: Gin HTTP server with path routing, SSRF guard, size limits, CSP
-- **upgrade**: Self-update from the source repo's Gitea releases — verify-then-replace, atomic binary swap
+- **upgrade**: Self-update from the source repo's Gitea releases — HTTPS-only same-origin channel, verify-then-replace with backup/rollback on Windows
 
 ## Security
 

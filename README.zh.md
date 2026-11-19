@@ -69,7 +69,16 @@ docker run -d -p 8080:8080 -v gitweb-state:/data gitweb
 gitweb upgrade
 ```
 
-从源仓库所在的 Gitea 实例下载最新 release，原地替换当前二进制。新二进制先通过校验（归档完整性、可执行格式与架构）才会替换旧文件；任何一步失败都保持原文件不动。替换完成后重启 gitweb 即运行新二进制。
+从源仓库所在的 Gitea 实例下载最新 release 并替换当前二进制。更新链路仅 HTTPS：API 请求、asset 下载与每一跳重定向都必须严格同源（scheme、主机、端口全等），降级与跨源目标一律拒绝。
+
+替换前先校验下载产物：归档完整性（gzip 校验和必查）、可执行格式、架构与头部表边界。若 release 附带 `<asset>.sha256` 校验和 asset 则一并比对；没有校验和时，校验覆盖完整性与格式，但不覆盖发布者真实性。下载或校验的任何一步失败都保持原文件不动。
+
+替换方式因平台而异：
+
+- **Linux/macOS**：rename 原子覆盖旧二进制，运行中的进程不受影响。
+- **Windows**：运行中的可执行文件无法覆盖，先把旧文件 rename 为 `<binary>.old`，再让新文件就位。这*不是*原子操作：第二步失败会回滚旧文件；回滚也失败时保留 `.old` 备份，错误信息会给出恢复位置。两次 rename 之间中断的升级会在下次运行开头自动恢复。升级成功后 `.old` 备份保留到下次升级确认可执行文件健在为止。
+
+替换完成后重启 gitweb 即运行新二进制。
 
 发布仓库为私有，需通过环境变量提供 Gitea access token：
 
@@ -240,7 +249,7 @@ Gitea 的 `ref` 支持分支、tag、commit SHA 三种。Gitea raw 端点区分�
 - **cache**：内存 LRU + TTL 缓存（hashicorp/golang-lru/v2）
 - **render**：Markdown/HTML/文本 渲染 —— 可渲染文件类型的唯一判定来源
 - **server**：Gin HTTP 服务器，包含路径路由、SSRF 防护、大小限制、CSP
-- **upgrade**：自更新 —— 从源仓库的 Gitea release 下载，先校验后原子替换二进制
+- **upgrade**：自更新 —— 从源仓库的 Gitea release 下载，仅 HTTPS 严格同源链路，先校验后替换，Windows 带备份与回滚
 
 ## 安全
 
