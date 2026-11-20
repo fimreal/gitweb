@@ -75,7 +75,7 @@ gitweb upgrade
 
 替换方式：新二进制先写入可执行文件同目录的临时文件，再 rename 原子覆盖，运行中的进程不受影响。替换完成后重启 gitweb 即运行新二进制。
 
-源仓库为私有时，需通过环境变量提供 GitHub access token：
+默认源仓库是公开的，无需 token 即可升级。撞 GitHub API 限额时（或把源仓库覆盖为私有仓库时）可通过环境变量提供 GitHub access token：
 
 ```bash
 GITHUB_TOKEN=<token> gitweb upgrade

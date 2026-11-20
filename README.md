@@ -75,7 +75,7 @@ Before replacement the download is verified: full archive integrity (the gzip tr
 
 Replacement: the new binary is written to a temp file in the same directory as the executable, then atomically renamed over it; a running process is unaffected. Restart gitweb afterwards to run the new binary.
 
-If the release repository is private, provide a GitHub access token via environment variable:
+The default source repository is public, so no token is needed. Optionally provide a GitHub access token via environment variable to raise API rate limits (required if you override the source to a private repository):
 
 ```bash
 GITHUB_TOKEN=<token> gitweb upgrade

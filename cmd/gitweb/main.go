@@ -223,9 +223,10 @@ func main() {
 	reg.Close()
 }
 
-// runUpgrade 执行自更新。私有仓库的访问凭据走 GITHUB_TOKEN 环境变量，
-// 源仓库（owner/name）可用 GITWEB_UPGRADE_REPO 覆盖；凭据不做成 flag，
-// 避免 token 出现在 shell 历史与进程列表里。
+// runUpgrade 执行自更新。默认源仓库公开，无需凭据；GITHUB_TOKEN 可选
+// （提 API 额度，源仓库覆盖为私有时必填），源仓库（owner/name）可用
+// GITWEB_UPGRADE_REPO 覆盖；凭据不做成 flag，避免 token 出现在 shell
+// 历史与进程列表里。
 func runUpgrade(args []string) {
 	if len(args) > 0 {
 		log.Fatal("Usage: gitweb upgrade")

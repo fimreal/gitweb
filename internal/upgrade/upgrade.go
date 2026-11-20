@@ -84,7 +84,7 @@ var errTooManyRedirects = errors.New("too many redirects")
 type Options struct {
 	BaseURL        string // GitHub API 根地址，必须 HTTPS，默认 DefaultBaseURL
 	Repo           string // owner/name，默认 DefaultRepo
-	Token          string // GitHub access token；私有仓库必填，公开仓库可留空
+	Token          string // GitHub access token；默认源仓库公开可留空，撞 API 限额时可选设置（私有仓库必填）
 	GOOS           string // 目标平台（linux/darwin），默认 runtime.GOOS
 	GOARCH         string // 目标架构（amd64/arm64），默认 runtime.GOARCH
 	ExecutablePath string // 要替换的可执行文件路径，默认当前进程

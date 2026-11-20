@@ -19,11 +19,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gin-gonic/gin"
 	"github.com/fimreal/gitweb/internal/cache"
 	"github.com/fimreal/gitweb/internal/provider"
 	"github.com/fimreal/gitweb/internal/registry"
 	"github.com/fimreal/gitweb/internal/render"
+	"github.com/gin-gonic/gin"
 )
 
 // viewerCSP 是 viewer 页面下发的严格 CSP：
