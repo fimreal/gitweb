@@ -11,12 +11,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gin-gonic/gin"
 	"github.com/fimreal/gitweb/internal/cache"
 	"github.com/fimreal/gitweb/internal/provider"
 	"github.com/fimreal/gitweb/internal/registry"
 	"github.com/fimreal/gitweb/internal/render"
 	"github.com/fimreal/gitweb/web"
+	"github.com/gin-gonic/gin"
 )
 
 const testBaseURL = "http://localhost:8080"

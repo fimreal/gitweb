@@ -20,6 +20,7 @@ import (
 	"github.com/fimreal/gitweb/internal/registry"
 	"github.com/fimreal/gitweb/internal/render"
 	"github.com/fimreal/gitweb/internal/server"
+	"github.com/fimreal/gitweb/internal/upgrade"
 	"github.com/fimreal/gitweb/web"
 )
 
@@ -27,6 +28,13 @@ import (
 var version = "dev"
 
 func main() {
+	// upgrade 是唯一的子命令，只做「下载最新版并替换当前二进制」，
+	// 必须在 flag.Parse 之前分发，且任何输出都不携带版本号。
+	if len(os.Args) > 1 && os.Args[1] == "upgrade" {
+		runUpgrade(os.Args[2:])
+		return
+	}
+
 	configPath := flag.String("config", "", "path to config file")
 	listen := flag.String("listen", "", "listen address (overrides config)")
 	baseURL := flag.String("base-url", "", "base URL (overrides config)")
@@ -36,6 +44,11 @@ func main() {
 	statePath := flag.String("state", "", "path to state file for persisted sites; empty = in-memory only (overrides config state_file; default: $GITWEB_STATE, else ./gitweb.state.json)")
 	allowHosts := flag.String("allow-host", "", "comma-separated extra hosts to allow through SSRF (e.g. git.example.com); for trusted self-hosted instances that resolve to private IPs")
 	showVersion := flag.Bool("v", false, "print version and exit")
+	flag.Usage = func() {
+		fmt.Fprintln(flag.CommandLine.Output(), "Usage: gitweb [flags]")
+		fmt.Fprintln(flag.CommandLine.Output(), "       gitweb upgrade   (download the latest release and replace this binary)")
+		flag.PrintDefaults()
+	}
 	flag.Parse()
 
 	if *showVersion {
@@ -208,6 +221,25 @@ func main() {
 	defer cancel()
 	_ = httpSrv.Shutdown(ctx)
 	reg.Close()
+}
+
+// runUpgrade 执行自更新。默认源仓库公开，无需凭据；GITHUB_TOKEN 可选
+// （提 API 额度，源仓库覆盖为私有时必填），源仓库（owner/name）可用
+// GITWEB_UPGRADE_REPO 覆盖；凭据不做成 flag，避免 token 出现在 shell
+// 历史与进程列表里。
+func runUpgrade(args []string) {
+	if len(args) > 0 {
+		log.Fatal("Usage: gitweb upgrade")
+	}
+	log.Print("Downloading latest release...")
+	opts := upgrade.Options{
+		Token: os.Getenv("GITHUB_TOKEN"),
+		Repo:  os.Getenv("GITWEB_UPGRADE_REPO"),
+	}
+	if err := upgrade.Upgrade(context.Background(), opts); err != nil {
+		log.Fatalf("Upgrade failed: %v", err)
+	}
+	log.Print("Upgrade completed. Restart gitweb to run the new binary.")
 }
 
 // defaultStatePath 是 -state、config 的 state_file 与 GITWEB_STATE 都未指定时的落盘位置。

@@ -12,12 +12,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gin-gonic/gin"
 	"github.com/fimreal/gitweb/internal/cache"
 	"github.com/fimreal/gitweb/internal/provider"
 	"github.com/fimreal/gitweb/internal/registry"
 	"github.com/fimreal/gitweb/internal/render"
 	"github.com/fimreal/gitweb/web"
+	"github.com/gin-gonic/gin"
 )
 
 // streamFixture 是一个可打真实路由的 Server，上游换成一个假装成 Gitea 的 httptest 源站。

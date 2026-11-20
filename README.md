@@ -63,6 +63,32 @@ docker run -d -p 8080:8080 -v gitweb-state:/data gitweb
 
 Visit `http://localhost:8080` to register repositories.
 
+### Self upgrade
+
+```bash
+gitweb upgrade
+```
+
+Downloads the latest release from the source repository's GitHub Releases and replaces the current binary. Target platforms are Linux/macOS (amd64/arm64); Windows is not supported. The update channel is HTTPS-only: every hop of an API request stays strictly on the API origin (`api.github.com`) — a cross-origin response can never become the source of release metadata; assets are downloaded through the API asset endpoint (identical behavior for public and private repos), and asset redirects are only allowed to the same origin or a fixed list of GitHub asset CDN hosts (port 443 only) — downgrades and off-list targets are rejected, with an explicit hop cap. The token is only sent to the API origin and is stripped on cross-origin redirect hops.
+
+Before replacement the download is verified: full archive integrity (the gzip trailer checksum is always checked), executable format, architecture and header-table bounds; the GitHub API's `digest` field (sha256) is verified when present, otherwise a published `<asset>.sha256` checksum asset is verified. Be clear about what this covers: **with neither, only the gzip CRC, partial executable structure and the TLS transport are checked — there is no guarantee the file is complete and runnable**. The digest/checksum comes from the same API as the binary: it guards against transport corruption, but it is **not an independent publisher signature**. Any download or verification failure leaves the existing binary untouched.
+
+Replacement: the new binary is written to a temp file in the same directory as the executable, then atomically renamed over it; a running process is unaffected. Restart gitweb afterwards to run the new binary.
+
+The default source repository is public, so no token is needed. Optionally provide a GitHub access token via environment variable to raise API rate limits (required if you override the source to a private repository):
+
+```bash
+GITHUB_TOKEN=<token> gitweb upgrade
+```
+
+The source repository defaults to `fimreal/gitweb` and can be overridden:
+
+```bash
+GITWEB_UPGRADE_REPO=<owner>/<repo> gitweb upgrade
+```
+
+The command only upgrades — it never prints version information. To honor the "no version numbers in any output" rule, upgrade failures report fixed-category messages only — no paths, URLs or underlying system errors, since the install directory and download URLs may contain version numbers. The tradeoff: errors never show concrete paths.
+
 ## Configuration
 
 See `config.example.yaml` for a full example.
@@ -244,6 +270,7 @@ Long plain-text files are paginated client-side.
 - **cache**: In-memory LRU + TTL cache (hashicorp/golang-lru/v2)
 - **render**: Markdown/HTML/text rendering — single source of truth for renderable file types
 - **server**: Gin HTTP server with path routing, SSRF guard, size limits, CSP
+- **upgrade**: Self-update from the source repo's GitHub Releases — HTTPS-only, token confined to the API origin, verify-then-replace via atomic rename (linux/darwin)
 
 ## Security
 

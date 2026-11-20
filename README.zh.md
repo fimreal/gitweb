@@ -63,6 +63,32 @@ docker run -d -p 8080:8080 -v gitweb-state:/data gitweb
 
 访问 `http://localhost:8080` 即可注册仓库。
 
+### 自更新
+
+```bash
+gitweb upgrade
+```
+
+从源仓库的 GitHub Releases 下载最新 release 并替换当前二进制。目标平台为 Linux/macOS（amd64/arm64），不支持 Windows。更新链路仅 HTTPS：API 请求每一跳严格同源（源站 `api.github.com`），跨源响应不能成为 release 元数据来源；asset 统一走 API asset 端点下载（公开与私有仓库行为一致），其重定向只放行同源或固定的 GitHub 资产 CDN 域名（端口限 443），降级与白名单外的目标一律拒绝，跳数有上限。token 只发往 API 源站，跨源重定向跳会剥离凭据。
+
+替换前先校验下载产物：归档完整性（gzip 尾部校验和必查）、可执行格式、架构与头部表边界；GitHub API 若返回 `digest` 字段（sha256）则强制比对，否则 release 附带 `<asset>.sha256` 校验和 asset 时强制比对。校验的边界要说清楚：**两者都没有时，实际检查的只有 gzip CRC、部分可执行结构和 TLS 传输链路，不保证文件完整、可运行**；digest/校验和与二进制来自同一 API，防的是传输损坏，**不是独立的发布者签名**。下载或校验的任何一步失败都保持原文件不动。
+
+替换方式：新二进制先写入可执行文件同目录的临时文件，再 rename 原子覆盖，运行中的进程不受影响。替换完成后重启 gitweb 即运行新二进制。
+
+默认源仓库是公开的，无需 token 即可升级。撞 GitHub API 限额时（或把源仓库覆盖为私有仓库时）可通过环境变量提供 GitHub access token：
+
+```bash
+GITHUB_TOKEN=<token> gitweb upgrade
+```
+
+源仓库默认 `fimreal/gitweb`，可用环境变量覆盖：
+
+```bash
+GITWEB_UPGRADE_REPO=<owner>/<repo> gitweb upgrade
+```
+
+该命令只做更新替换，不输出任何版本信息。为满足「任何输出不含版本号」的约定，升级失败的报错只有固定分类文案，不携带路径、URL 或底层系统错误 —— 安装目录和下载链接都可能含版本号。代价是报错里拿不到具体路径。
+
 ## 配置
 
 完整示例见 `config.example.yaml`。
@@ -224,6 +250,7 @@ Gitea 的 `ref` 支持分支、tag、commit SHA 三种。Gitea raw 端点区分�
 - **cache**：内存 LRU + TTL 缓存（hashicorp/golang-lru/v2）
 - **render**：Markdown/HTML/文本 渲染 —— 可渲染文件类型的唯一判定来源
 - **server**：Gin HTTP 服务器，包含路径路由、SSRF 防护、大小限制、CSP
+- **upgrade**：自更新 —— 从源仓库的 GitHub Releases 下载，仅 HTTPS，token 只发往 API 源站，先校验后 rename 原子替换（linux/darwin）
 
 ## 安全
 
