@@ -10,9 +10,10 @@
 // 凭据，只在 API url 缺失时兜底。
 //
 // 安全边界：
-//   - 仅 HTTPS。API 请求严格同源；asset 下载必然被 GitHub 重定向到其资产 CDN，
-//     因此重定向目标只放行同源或固定的 GitHub CDN 域名白名单（端口限 443），
-//     任何降级或白名单外的主机直接拒绝，跳数显式封顶。
+//   - 仅 HTTPS。release 元数据（API）请求每一跳严格同源 —— 跨源响应不能
+//     成为下载地址与 digest 的来源；asset 下载必然被 GitHub 重定向到其资产
+//     CDN，因此只有 asset 链路的重定向放行同源或固定的 GitHub CDN 域名
+//     白名单（端口限 443），任何降级或白名单外的主机直接拒绝，跳数显式封顶。
 //   - token 只发往 API 源站；跨源重定向跳显式剥离 Authorization。
 //   - 对外错误一律固定分类文案，不携带 URL、tag、路径或底层网络/文件系统错误
 //     —— 下载路径含 release tag，安装目录可能含版本号。
@@ -112,23 +113,29 @@ func Upgrade(ctx context.Context, opts Options) error {
 	if opts.Client == nil {
 		opts.Client = &http.Client{Timeout: 5 * time.Minute}
 	}
-	opts.Client.CheckRedirect = redirectPolicy(base)
+	// API 与 asset 各用一份 client 副本、两套重定向策略：元数据每一跳严格
+	// 同源，只有 asset 允许 CDN 白名单。副本避免改写调用方注入的 client。
+	apiClient := *opts.Client
+	apiClient.CheckRedirect = apiRedirectPolicy(base)
+	assetClient := *opts.Client
+	assetClient.CheckRedirect = assetRedirectPolicy(base)
 
-	assetURL, checksumURL, digest, err := latestAssetURL(ctx, opts, base)
+	rel, err := latestAsset(ctx, opts, &apiClient, base)
 	if err != nil {
 		return err
 	}
-	archive, err := download(ctx, opts, base, assetURL, maxDownloadSize, "release asset")
+	archive, err := download(ctx, opts, &assetClient, base, rel.url, maxDownloadSize, "release asset")
 	if err != nil {
 		return err
 	}
-	// digest 来自 release API 本身，优先于同源下载的 .sha256 sidecar。
-	if digest != "" {
-		if err := verifyDigest(digest, archive); err != nil {
+	// digest 来自 release API 本身，优先于同源下载的 .sha256 sidecar；
+	// sidecar 的可用性检查只在确实要用它（无 digest）时做。
+	if rel.digest != "" {
+		if err := verifyDigest(rel.digest, archive); err != nil {
 			return err
 		}
-	} else if checksumURL != "" {
-		if err := verifyChecksum(ctx, opts, base, checksumURL, archive); err != nil {
+	} else if rel.hasChecksum {
+		if err := verifyChecksum(ctx, opts, &assetClient, base, rel.checksumURL, archive); err != nil {
 			return err
 		}
 	}
@@ -154,9 +161,23 @@ func Upgrade(ctx context.Context, opts Options) error {
 	return replaceBinary(exePath, bin)
 }
 
-// redirectPolicy 每一跳重定向都重新校验：跳数封顶、目标必须在允许链路内，
-// 跨源跳显式剥离 Authorization —— token 只属于 API 源站。
-func redirectPolicy(base *url.URL) func(*http.Request, []*http.Request) error {
+// apiRedirectPolicy 是 release 元数据请求的重定向策略：每一跳严格同源。
+// CDN 白名单只属于 asset 链路 —— 跨源响应不能决定下载地址与 digest。
+func apiRedirectPolicy(base *url.URL) func(*http.Request, []*http.Request) error {
+	return func(req *http.Request, via []*http.Request) error {
+		if len(via) >= maxRedirects {
+			return errTooManyRedirects
+		}
+		if !sameOrigin(base, req.URL) {
+			return errCrossOrigin
+		}
+		return nil
+	}
+}
+
+// assetRedirectPolicy 是 asset 下载的重定向策略：跳数封顶、目标必须在
+// 允许链路内，跨源跳显式剥离 Authorization —— token 只属于 API 源站。
+func assetRedirectPolicy(base *url.URL) func(*http.Request, []*http.Request) error {
 	return func(req *http.Request, via []*http.Request) error {
 		if len(via) >= maxRedirects {
 			return errTooManyRedirects
@@ -203,9 +224,9 @@ func assetName(goos, goarch string) string {
 	return fmt.Sprintf("gitweb-%s-%s.tar.gz", goos, goarch)
 }
 
-// doGET 发起 GET；token 只附加在与 API 源站严格同源的目标上。
-// 网络错误不透出底层 url.Error —— 它携带完整 URL（含 release tag）。
-func doGET(ctx context.Context, opts Options, base *url.URL, rawURL, label, accept string) (*http.Response, error) {
+// doGET 用指定策略的 client 发起 GET；token 只附加在与 API 源站严格同源
+// 的目标上。网络错误不透出底层 url.Error —— 它携带完整 URL（含 release tag）。
+func doGET(ctx context.Context, opts Options, client *http.Client, base *url.URL, rawURL, label, accept string) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("%s request failed", label)
@@ -216,7 +237,7 @@ func doGET(ctx context.Context, opts Options, base *url.URL, rawURL, label, acce
 	if u, err := url.Parse(rawURL); err == nil && opts.Token != "" && sameOrigin(base, u) {
 		req.Header.Set("Authorization", "Bearer "+opts.Token)
 	}
-	resp, err := opts.Client.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		// 重定向策略的拒绝是固定文案，按 sentinel 透传保留分类；
 		// 其余网络错误不透出底层 url.Error —— 它携带完整 URL（含 release tag）。
@@ -231,23 +252,33 @@ func doGET(ctx context.Context, opts Options, base *url.URL, rawURL, label, acce
 	return resp, nil
 }
 
-// latestAssetURL 查询最新 release，选出当前平台 asset 的 API 下载地址、
+// releaseAsset 是从最新 release 选出的当前平台 asset 的下载信息。
+// sidecar 的可用性（URL 非空、在链路白名单内）只在确实要用它时检查。
+type releaseAsset struct {
+	url         string
+	digest      string
+	checksumURL string
+	hasChecksum bool
+}
+
+// latestAsset 查询最新 release，选出当前平台 asset 的 API 下载地址、
 // 可选校验和 sidecar 与可选 digest。刻意不解析、不返回 tag 名 ——
 // 版本号不允许出现在任何输出里。
-func latestAssetURL(ctx context.Context, opts Options, base *url.URL) (assetURL, checksumURL, digest string, err error) {
+func latestAsset(ctx context.Context, opts Options, client *http.Client, base *url.URL) (releaseAsset, error) {
+	var rel releaseAsset
 	api := fmt.Sprintf("%s/repos/%s/releases/latest", opts.BaseURL, opts.Repo)
-	resp, err := doGET(ctx, opts, base, api, "release API", "application/vnd.github+json")
+	resp, err := doGET(ctx, opts, client, base, api, "release API", "application/vnd.github+json")
 	if err != nil {
-		return "", "", "", err
+		return rel, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNotFound {
-		return "", "", "", errors.New("no published release found on the update server")
+		return rel, errors.New("no published release found on the update server")
 	}
 	if resp.StatusCode != http.StatusOK {
-		return "", "", "", fmt.Errorf("release API returned HTTP %d", resp.StatusCode)
+		return rel, fmt.Errorf("release API returned HTTP %d", resp.StatusCode)
 	}
-	var rel struct {
+	var parsed struct {
 		Assets []struct {
 			Name               string `json:"name"`
 			URL                string `json:"url"`
@@ -255,12 +286,11 @@ func latestAssetURL(ctx context.Context, opts Options, base *url.URL) (assetURL,
 			Digest             string `json:"digest"`
 		} `json:"assets"`
 	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&rel); err != nil {
-		return "", "", "", errors.New("parse release response failed")
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&parsed); err != nil {
+		return rel, errors.New("parse release response failed")
 	}
 	want := assetName(opts.GOOS, opts.GOARCH)
-	hasChecksum := false
-	for _, a := range rel.Assets {
+	for _, a := range parsed.Assets {
 		// 优先 API asset 端点：私有仓库的 browser_download_url 带不上凭据。
 		dl := a.URL
 		if dl == "" {
@@ -268,35 +298,26 @@ func latestAssetURL(ctx context.Context, opts Options, base *url.URL) (assetURL,
 		}
 		switch a.Name {
 		case want:
-			assetURL, digest = dl, a.Digest
+			rel.url, rel.digest = dl, a.Digest
 		case want + ".sha256":
-			hasChecksum, checksumURL = true, dl
+			rel.hasChecksum, rel.checksumURL = true, dl
 		}
 	}
-	if assetURL == "" {
-		return "", "", "", fmt.Errorf("latest release has no asset for %s/%s", opts.GOOS, opts.GOARCH)
-	}
-	// 声明了校验和 asset 却没有下载地址是发布异常，不能静默降级成「无校验和」。
-	if hasChecksum && checksumURL == "" {
-		return "", "", "", errors.New("checksum asset is present but has no download URL")
+	if rel.url == "" {
+		return rel, fmt.Errorf("latest release has no asset for %s/%s", opts.GOOS, opts.GOARCH)
 	}
 	// API 返回的地址同样要过链路白名单，恶意/被篡改的响应不能把请求引向别处。
-	if u, err := url.Parse(assetURL); err != nil || !allowedAssetURL(base, u) {
-		return "", "", "", errCrossOrigin
+	if u, err := url.Parse(rel.url); err != nil || !allowedAssetURL(base, u) {
+		return rel, errCrossOrigin
 	}
-	if checksumURL != "" {
-		if u, err := url.Parse(checksumURL); err != nil || !allowedAssetURL(base, u) {
-			return "", "", "", errCrossOrigin
-		}
-	}
-	return assetURL, checksumURL, digest, nil
+	return rel, nil
 }
 
-func download(ctx context.Context, opts Options, base *url.URL, rawURL string, limit int64, label string) ([]byte, error) {
+func download(ctx context.Context, opts Options, client *http.Client, base *url.URL, rawURL string, limit int64, label string) ([]byte, error) {
 	if u, err := url.Parse(rawURL); err != nil || !allowedAssetURL(base, u) {
 		return nil, errCrossOrigin
 	}
-	resp, err := doGET(ctx, opts, base, rawURL, label, "application/octet-stream")
+	resp, err := doGET(ctx, opts, client, base, rawURL, label, "application/octet-stream")
 	if err != nil {
 		return nil, err
 	}
@@ -331,9 +352,14 @@ func verifyDigest(digest string, archive []byte) error {
 }
 
 // verifyChecksum 比对 release 附带的 <asset>.sha256（sha256sum 格式，取首个字段）。
-// 校验和存在就必须通过：下载失败、格式非法、摘要不符都拒绝替换。
-func verifyChecksum(ctx context.Context, opts Options, base *url.URL, checksumURL string, archive []byte) error {
-	data, err := download(ctx, opts, base, checksumURL, maxChecksumSize, "checksum")
+// 只在无 digest、确实要用 sidecar 时调用；校验和存在就必须通过：
+// URL 缺失、下载失败、格式非法、摘要不符都拒绝替换。
+func verifyChecksum(ctx context.Context, opts Options, client *http.Client, base *url.URL, checksumURL string, archive []byte) error {
+	// 声明了校验和 asset 却没有下载地址是发布异常，不能静默降级成「无校验和」。
+	if checksumURL == "" {
+		return errors.New("checksum asset is present but has no download URL")
+	}
+	data, err := download(ctx, opts, client, base, checksumURL, maxChecksumSize, "checksum")
 	if err != nil {
 		return err
 	}

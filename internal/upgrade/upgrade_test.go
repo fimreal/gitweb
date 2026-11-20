@@ -360,6 +360,30 @@ func TestUpgradeDigest(t *testing.T) {
 			t.Fatalf("sidecar should not be fetched when digest is present: %d requests", len(auth))
 		}
 	})
+	t.Run("digest skips sidecar URL validation", func(t *testing.T) {
+		// digest 正确时 sidecar 根本不用：URL 为空或指向白名单外都不应失败。
+		for _, sidecarURL := range []string{"", "https://evil.com/v9.9.9/sum"} {
+			mux := http.NewServeMux()
+			var srv *httptest.Server
+			mux.HandleFunc("/repos/o/r/releases/latest", func(w http.ResponseWriter, r *http.Request) {
+				json.NewEncoder(w).Encode(map[string]any{
+					"tag_name": "v9.9.9",
+					"assets": []map[string]string{
+						{"name": "gitweb-linux-amd64.tar.gz", "url": srv.URL + "/download/v9.9.9/asset", "digest": good},
+						{"name": "gitweb-linux-amd64.tar.gz.sha256", "url": sidecarURL},
+					},
+				})
+			})
+			mux.HandleFunc("/download/", func(w http.ResponseWriter, r *http.Request) { w.Write(archive) })
+			srv = httptest.NewTLSServer(mux)
+			exe, _ := writeExe(t, "gitweb")
+			err := Upgrade(context.Background(), upgradeOpts(srv, exe, "linux", "amd64"))
+			srv.Close()
+			if err != nil {
+				t.Fatalf("unusable sidecar URL %q must be ignored when digest is present: %v", sidecarURL, err)
+			}
+		}
+	})
 	for _, tc := range []struct{ name, digest string }{
 		{"mismatch", "sha256:" + strings.Repeat("0", 64)},
 		{"malformed algorithm", "md5:" + hex.EncodeToString(sum[:])},
@@ -603,9 +627,9 @@ func TestSameOrigin(t *testing.T) {
 
 // asset 链路白名单与重定向策略的单元验证：GitHub CDN 域名放行但剥离
 // Authorization，白名单外/降级/非默认端口拒绝，跳数封顶。
-func TestRedirectPolicyUnit(t *testing.T) {
+func TestAssetRedirectPolicyUnit(t *testing.T) {
 	base, _ := url.Parse("https://api.github.com")
-	policy := redirectPolicy(base)
+	policy := assetRedirectPolicy(base)
 
 	check := func(rawURL string, via int) (*http.Request, error) {
 		req, _ := http.NewRequest(http.MethodGet, rawURL, nil)
@@ -653,6 +677,79 @@ func TestRedirectPolicyUnit(t *testing.T) {
 			t.Fatalf("expected redirect cap, got: %v", err)
 		}
 	})
+}
+
+// API（release 元数据）策略的单元验证：每一跳严格同源，CDN 白名单只属于
+// asset 链路 —— API 跳到白名单域也必须拒绝，跨源响应不能决定下载地址/digest。
+func TestAPIRedirectPolicyUnit(t *testing.T) {
+	base, _ := url.Parse("https://api.github.com")
+	policy := apiRedirectPolicy(base)
+
+	check := func(rawURL string, via int) error {
+		req, _ := http.NewRequest(http.MethodGet, rawURL, nil)
+		return policy(req, make([]*http.Request, via))
+	}
+
+	if err := check("https://api.github.com/repos/o/r/releases/latest", 1); err != nil {
+		t.Fatalf("same-origin API hop must be allowed: %v", err)
+	}
+	for _, rawURL := range []string{
+		"https://objects.githubusercontent.com/meta",
+		"https://release-assets.githubusercontent.com/meta",
+		"https://github-releases.githubusercontent.com/meta",
+		"https://github.com/meta",
+		"https://evil.com/meta",
+		"http://api.github.com/meta",
+		"https://api.github.com:8443/meta",
+	} {
+		if err := check(rawURL, 1); !errors.Is(err, errCrossOrigin) {
+			t.Errorf("API redirect to %s must be rejected, got: %v", rawURL, err)
+		}
+	}
+	if err := check("https://api.github.com/a", maxRedirects); !errors.Is(err, errTooManyRedirects) {
+		t.Fatalf("expected redirect cap, got: %v", err)
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// API 重定向到 CDN 白名单域的集成验证：必须被拒，且请求绝不真正出门。
+// Transport 包一层记录器，任何离开测试服务器的请求都记为逃逸。
+func TestUpgradeAPIRedirectToCDNRejected(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/repos/o/r/releases/latest", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "https://objects.githubusercontent.com/v9.9.9/meta", http.StatusFound)
+	})
+	srv := httptest.NewTLSServer(mux)
+	t.Cleanup(srv.Close)
+	exe, _ := writeExe(t, "gitweb")
+
+	srvURL, _ := url.Parse(srv.URL)
+	var escaped []string
+	client := srv.Client()
+	inner := client.Transport
+	client.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Host != srvURL.Host {
+			escaped = append(escaped, r.URL.Host)
+			return nil, errors.New("request escaped the test origin")
+		}
+		return inner.RoundTrip(r)
+	})
+
+	opts := upgradeOpts(srv, exe, "linux", "amd64")
+	opts.Client = client
+	opts.Token = "s3cret"
+	err := Upgrade(context.Background(), opts)
+	if !errors.Is(err, errCrossOrigin) {
+		t.Fatalf("API redirect to a CDN host must be rejected, got: %v", err)
+	}
+	if len(escaped) != 0 {
+		t.Fatalf("requests escaped the API origin: %v", escaped)
+	}
+	assertNoVersionLeak(t, err)
+	assertExeUntouched(t, exe)
 }
 
 // 网络错误不得经 url.Error 泄漏含 tag 的 URL：连接失败与下载中途断连都测。
@@ -772,7 +869,9 @@ func TestUpgradeGzipBomb(t *testing.T) {
 }
 
 // 声明了 <asset>.sha256 却没有下载地址：发布异常，必须报错而不是当作无校验和。
+// 检查发生在确实要用 sidecar 时 —— asset 本体下载成功后才触发。
 func TestUpgradeChecksumAssetWithoutURL(t *testing.T) {
+	archive := tarGz(t, "gitweb", elfBinary(62))
 	mux := http.NewServeMux()
 	var srv *httptest.Server
 	mux.HandleFunc("/repos/o/r/releases/latest", func(w http.ResponseWriter, r *http.Request) {
@@ -784,6 +883,7 @@ func TestUpgradeChecksumAssetWithoutURL(t *testing.T) {
 			},
 		})
 	})
+	mux.HandleFunc("/download/", func(w http.ResponseWriter, r *http.Request) { w.Write(archive) })
 	srv = httptest.NewTLSServer(mux)
 	t.Cleanup(srv.Close)
 	exe, _ := writeExe(t, "gitweb")
