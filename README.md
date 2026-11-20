@@ -69,30 +69,25 @@ Visit `http://localhost:8080` to register repositories.
 gitweb upgrade
 ```
 
-Downloads the latest release from the source repository's Gitea instance and replaces the current binary. The update channel is HTTPS-only: the API request, the asset download and every redirect hop must stay on the exact same origin (scheme, host and port); downgrades and cross-origin targets are rejected.
+Downloads the latest release from the source repository's GitHub Releases and replaces the current binary. Target platforms are Linux/macOS (amd64/arm64); Windows is not supported. The update channel is HTTPS-only: the API origin (`api.github.com`) is strictly same-origin; assets are downloaded through the API asset endpoint (identical behavior for public and private repos), and redirects are only allowed to the same origin or a fixed list of GitHub asset CDN hosts (port 443 only) — downgrades and off-list targets are rejected, with an explicit hop cap. The token is only sent to the API origin and is stripped on cross-origin redirect hops.
 
-Before replacement the download is verified: full archive integrity (the gzip trailer checksum is always checked), executable format, architecture and header-table bounds; a published `<asset>.sha256` checksum asset is verified as well. Be clear about what this covers: **without a checksum, only the gzip CRC, partial executable structure and the TLS transport are checked — there is no guarantee the file is complete and runnable**. Even with one, the checksum comes from the same origin as the binary: it guards against transport corruption, but it is **not an independent publisher signature**. Any download or verification failure leaves the existing binary untouched.
+Before replacement the download is verified: full archive integrity (the gzip trailer checksum is always checked), executable format, architecture and header-table bounds; the GitHub API's `digest` field (sha256) is verified when present, otherwise a published `<asset>.sha256` checksum asset is verified. Be clear about what this covers: **with neither, only the gzip CRC, partial executable structure and the TLS transport are checked — there is no guarantee the file is complete and runnable**. The digest/checksum comes from the same API as the binary: it guards against transport corruption, but it is **not an independent publisher signature**. Any download or verification failure leaves the existing binary untouched.
 
-Replacement differs by platform:
+Replacement: the new binary is written to a temp file in the same directory as the executable, then atomically renamed over it; a running process is unaffected. Restart gitweb afterwards to run the new binary.
 
-- **Linux/macOS**: atomic rename over the old binary; a running process is unaffected.
-- **Windows**: a running executable cannot be overwritten, so the old file is renamed to `<binary>.old` and the new one takes its place. This is *not* atomic. If the second rename fails, the old file is rolled back; if rollback also fails, the `.old` backup is kept. If an upgrade is interrupted between the two renames the original filename is left missing — recover either way:
-  1. Manually rename `gitweb.exe.old` back to `gitweb.exe` in the same directory — works offline, at any time;
-  2. Run the backup: `gitweb.exe.old upgrade` — a successful upgrade also restores the backup to the original name. Note the restore happens only after the download and all verification pass: if the upgrade fails (e.g. no release is available on the source server), nothing is restored — use option 1 in that case.
-
-  After a successful upgrade the `.old` backup is kept until the next upgrade confirms the executable exists.
-
-To honor the "no version numbers in any output" rule, upgrade failures report fixed-category messages only — no paths, URLs or underlying system errors, since the install directory and download URLs may contain version numbers. The tradeoff: errors never show concrete paths. The backup location is communicated by convention instead: always `<executable name>.old` in the same directory as the executable.
-
-Restart gitweb afterwards to run the new binary.
-
-The release repository is private, so provide a Gitea access token via environment variable:
+If the release repository is private, provide a GitHub access token via environment variable:
 
 ```bash
-GITWEB_UPGRADE_TOKEN=<token> gitweb upgrade
+GITHUB_TOKEN=<token> gitweb upgrade
 ```
 
-The command only upgrades — it never prints version information.
+The source repository defaults to `fimreal/gitweb` and can be overridden:
+
+```bash
+GITWEB_UPGRADE_REPO=<owner>/<repo> gitweb upgrade
+```
+
+The command only upgrades — it never prints version information. To honor the "no version numbers in any output" rule, upgrade failures report fixed-category messages only — no paths, URLs or underlying system errors, since the install directory and download URLs may contain version numbers. The tradeoff: errors never show concrete paths.
 
 ## Configuration
 
@@ -275,7 +270,7 @@ Long plain-text files are paginated client-side.
 - **cache**: In-memory LRU + TTL cache (hashicorp/golang-lru/v2)
 - **render**: Markdown/HTML/text rendering — single source of truth for renderable file types
 - **server**: Gin HTTP server with path routing, SSRF guard, size limits, CSP
-- **upgrade**: Self-update from the source repo's Gitea releases — HTTPS-only same-origin channel, verify-then-replace with backup/rollback on Windows
+- **upgrade**: Self-update from the source repo's GitHub Releases — HTTPS-only, token confined to the API origin, verify-then-replace via atomic rename (linux/darwin)
 
 ## Security
 

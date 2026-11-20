@@ -223,14 +223,18 @@ func main() {
 	reg.Close()
 }
 
-// runUpgrade 执行自更新。私有仓库的访问凭据走 GITWEB_UPGRADE_TOKEN 环境变量，
-// 不做成 flag，避免 token 出现在 shell 历史与进程列表里。
+// runUpgrade 执行自更新。私有仓库的访问凭据走 GITHUB_TOKEN 环境变量，
+// 源仓库（owner/name）可用 GITWEB_UPGRADE_REPO 覆盖；凭据不做成 flag，
+// 避免 token 出现在 shell 历史与进程列表里。
 func runUpgrade(args []string) {
 	if len(args) > 0 {
 		log.Fatal("Usage: gitweb upgrade")
 	}
 	log.Print("Downloading latest release...")
-	opts := upgrade.Options{Token: os.Getenv("GITWEB_UPGRADE_TOKEN")}
+	opts := upgrade.Options{
+		Token: os.Getenv("GITHUB_TOKEN"),
+		Repo:  os.Getenv("GITWEB_UPGRADE_REPO"),
+	}
 	if err := upgrade.Upgrade(context.Background(), opts); err != nil {
 		log.Fatalf("Upgrade failed: %v", err)
 	}

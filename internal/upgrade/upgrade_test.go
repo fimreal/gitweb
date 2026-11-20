@@ -21,7 +21,7 @@ import (
 )
 
 // fixture 构造结构完整、>= minBinarySize 的可执行文件映像：
-// 头部字段 + 合法的段/节/load command 表 + 填充。只有头字段的假二进制
+// 头部字段 + 合法的段/load command 表 + 填充。只有头字段的假二进制
 // 过不了 verifyBinary，测试的成功路径必须用这种完整 fixture。
 
 func elfBinary(machine uint16) []byte {
@@ -37,20 +37,6 @@ func elfBinary(machine uint16) []byte {
 	binary.LittleEndian.PutUint32(ph[0:4], 1) // PT_LOAD
 	binary.LittleEndian.PutUint64(ph[8:16], 0)
 	binary.LittleEndian.PutUint64(ph[32:40], uint64(len(b))) // p_filesz
-	return b
-}
-
-func peBinary(machine uint16) []byte {
-	b := make([]byte, 4096)
-	b[0], b[1] = 'M', 'Z'
-	binary.LittleEndian.PutUint32(b[0x3c:0x40], 0x40)
-	copy(b[0x40:], []byte{'P', 'E', 0, 0})
-	binary.LittleEndian.PutUint16(b[0x44:0x46], machine)
-	binary.LittleEndian.PutUint16(b[0x46:0x48], 1)   // NumberOfSections
-	binary.LittleEndian.PutUint16(b[0x54:0x56], 240) // SizeOfOptionalHeader (PE32+)
-	sec := b[0x40+24+240:]
-	binary.LittleEndian.PutUint32(sec[16:20], 512)  // SizeOfRawData
-	binary.LittleEndian.PutUint32(sec[20:24], 1024) // PointerToRawData
 	return b
 }
 
@@ -94,12 +80,14 @@ func tarGzMulti(t *testing.T, entries [][2]any) []byte {
 	return buf.Bytes()
 }
 
-// releaseServer 模拟 Gitea（TLS）：latest API + asset 下载 + 可选校验和。
+// releaseServer 模拟 GitHub API（TLS）：latest API + API asset 端点 +
+// browser_download_url 兜底 + 可选校验和 sidecar 与 digest 字段。
 // tag 固定带一个版本号，用于断言任何错误输出都不会把它泄漏出来。
 type releaseServer struct {
 	assetFile string
 	archive   []byte
 	checksum  string // 非空则作为 <asset>.sha256 asset 发布
+	digest    string // 非空则作为 asset 的 digest 字段返回
 	gotAuth   *[]string
 }
 
@@ -107,26 +95,41 @@ func newReleaseServer(t *testing.T, rs releaseServer) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
 	var srv *httptest.Server
-	mux.HandleFunc("/api/v1/repos/o/r/releases/latest", func(w http.ResponseWriter, r *http.Request) {
+	record := func(r *http.Request) {
 		if rs.gotAuth != nil {
 			*rs.gotAuth = append(*rs.gotAuth, r.Header.Get("Authorization"))
 		}
-		assets := []map[string]string{{
+	}
+	mux.HandleFunc("/repos/o/r/releases/latest", func(w http.ResponseWriter, r *http.Request) {
+		record(r)
+		asset := map[string]string{
 			"name":                 rs.assetFile,
+			"url":                  srv.URL + "/repos/o/r/releases/assets/1",
 			"browser_download_url": srv.URL + "/download/v9.9.9/" + rs.assetFile,
-		}}
+		}
+		if rs.digest != "" {
+			asset["digest"] = rs.digest
+		}
+		assets := []map[string]string{asset}
 		if rs.checksum != "" {
 			assets = append(assets, map[string]string{
 				"name":                 rs.assetFile + ".sha256",
+				"url":                  srv.URL + "/repos/o/r/releases/assets/2",
 				"browser_download_url": srv.URL + "/download/v9.9.9/" + rs.assetFile + ".sha256",
 			})
 		}
 		json.NewEncoder(w).Encode(map[string]any{"tag_name": "v9.9.9", "assets": assets})
 	})
-	mux.HandleFunc("/download/", func(w http.ResponseWriter, r *http.Request) {
-		if rs.gotAuth != nil {
-			*rs.gotAuth = append(*rs.gotAuth, r.Header.Get("Authorization"))
+	mux.HandleFunc("/repos/o/r/releases/assets/", func(w http.ResponseWriter, r *http.Request) {
+		record(r)
+		if strings.HasSuffix(r.URL.Path, "/2") {
+			w.Write([]byte(rs.checksum))
+			return
 		}
+		w.Write(rs.archive)
+	})
+	mux.HandleFunc("/download/", func(w http.ResponseWriter, r *http.Request) {
+		record(r)
 		if strings.HasSuffix(r.URL.Path, ".sha256") {
 			w.Write([]byte(rs.checksum))
 			return
@@ -197,43 +200,6 @@ func TestUpgradeReplacesBinary(t *testing.T) {
 	}
 }
 
-// Windows 路径：旧文件 rename 成 .old 让位；成功后 .old 保留为备份，
-// 下次升级确认 exe 健在后才清理。在 Linux 宿主上验证同一套 rename 逻辑。
-func TestUpgradeWindowsBackupLifecycle(t *testing.T) {
-	bin := peBinary(0x8664)
-	srv := newReleaseServer(t, releaseServer{assetFile: "gitweb-windows-amd64.tar.gz", archive: tarGz(t, "gitweb.exe", bin)})
-	exe, dir := writeExe(t, "gitweb.exe")
-	// 上次升级残留的 .old，本次 exe 健在，应顺带清掉。
-	if err := os.WriteFile(exe+".old", []byte("stale"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := Upgrade(context.Background(), upgradeOpts(srv, exe, "windows", "amd64")); err != nil {
-		t.Fatal(err)
-	}
-	got, _ := os.ReadFile(exe)
-	if !bytes.Equal(got, bin) {
-		t.Fatal("executable not replaced")
-	}
-	backup, err := os.ReadFile(exe + ".old")
-	if err != nil || string(backup) != "old binary" {
-		t.Fatalf(".old backup should hold the previous binary: %q, %v", backup, err)
-	}
-	entries, _ := os.ReadDir(dir)
-	if len(entries) != 2 {
-		t.Fatalf("unexpected dir contents: %v", entries)
-	}
-
-	// 第二次升级：exe 健在 → 过期 .old 被清理，再留新备份。
-	if err := Upgrade(context.Background(), upgradeOpts(srv, exe, "windows", "amd64")); err != nil {
-		t.Fatal(err)
-	}
-	backup, _ = os.ReadFile(exe + ".old")
-	if !bytes.Equal(backup, bin) {
-		t.Fatal(".old should now hold the first upgraded binary")
-	}
-}
-
 func TestUpgradeDarwinArm64(t *testing.T) {
 	bin := machOBinary(0x0100000c)
 	srv := newReleaseServer(t, releaseServer{assetFile: "gitweb-darwin-arm64.tar.gz", archive: tarGz(t, "gitweb", bin)})
@@ -282,7 +248,7 @@ func TestUpgradeMissingAsset(t *testing.T) {
 }
 
 // 校验失败的各种形态：坏 gzip、gzip 尾部截断/CRC 损坏、缺二进制条目、
-// 重复条目、坏 magic、架构不符、结构不完整 —— 原文件都必须原样。
+// 重复条目、坏 magic、架构不符、结构不完整、头部溢出 —— 原文件都必须原样。
 func TestUpgradeVerificationFailuresKeepOriginal(t *testing.T) {
 	valid := tarGz(t, "gitweb", elfBinary(62))
 	truncated := valid[:len(valid)-3]
@@ -292,7 +258,7 @@ func TestUpgradeVerificationFailuresKeepOriginal(t *testing.T) {
 	binary.LittleEndian.PutUint32(noLoad[64:68], 2) // PT_DYNAMIC instead of PT_LOAD
 	oobSegment := elfBinary(62)
 	binary.LittleEndian.PutUint64(oobSegment[64+32:64+40], 1<<40) // p_filesz past EOF
-	// CodeReviewer 的溢出复现：phoff + phnum*phentsize 无符号绕回后曾切片 panic。
+	// 溢出复现：phoff + phnum*phentsize 无符号绕回后曾切片 panic。
 	phoffOverflow := elfBinary(62)
 	binary.LittleEndian.PutUint64(phoffOverflow[32:40], ^uint64(0)-15)
 	segOverflow := elfBinary(62)
@@ -363,6 +329,55 @@ func TestUpgradeChecksum(t *testing.T) {
 	}
 }
 
+// GitHub API 的 digest 字段：存在就强制比对，且优先于 .sha256 sidecar。
+func TestUpgradeDigest(t *testing.T) {
+	bin := elfBinary(62)
+	archive := tarGz(t, "gitweb", bin)
+	sum := sha256.Sum256(archive)
+	good := "sha256:" + hex.EncodeToString(sum[:])
+
+	t.Run("valid digest", func(t *testing.T) {
+		srv := newReleaseServer(t, releaseServer{assetFile: "gitweb-linux-amd64.tar.gz", archive: archive, digest: good})
+		exe, _ := writeExe(t, "gitweb")
+		if err := Upgrade(context.Background(), upgradeOpts(srv, exe, "linux", "amd64")); err != nil {
+			t.Fatal(err)
+		}
+	})
+	t.Run("digest takes precedence over sidecar", func(t *testing.T) {
+		// sidecar 内容是坏的，但 digest 正确：应成功且不再请求 sidecar。
+		var auth []string
+		srv := newReleaseServer(t, releaseServer{
+			assetFile: "gitweb-linux-amd64.tar.gz", archive: archive,
+			digest: good, checksum: "garbage", gotAuth: &auth,
+		})
+		exe, _ := writeExe(t, "gitweb")
+		opts := upgradeOpts(srv, exe, "linux", "amd64")
+		opts.Token = "s3cret"
+		if err := Upgrade(context.Background(), opts); err != nil {
+			t.Fatal(err)
+		}
+		if len(auth) != 2 { // latest API + asset，不含 sidecar
+			t.Fatalf("sidecar should not be fetched when digest is present: %d requests", len(auth))
+		}
+	})
+	for _, tc := range []struct{ name, digest string }{
+		{"mismatch", "sha256:" + strings.Repeat("0", 64)},
+		{"malformed algorithm", "md5:" + hex.EncodeToString(sum[:])},
+		{"malformed hex", "sha256:xyz"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := newReleaseServer(t, releaseServer{assetFile: "gitweb-linux-amd64.tar.gz", archive: archive, digest: tc.digest})
+			exe, _ := writeExe(t, "gitweb")
+			err := Upgrade(context.Background(), upgradeOpts(srv, exe, "linux", "amd64"))
+			if err == nil {
+				t.Fatal("expected digest error")
+			}
+			assertNoVersionLeak(t, err)
+			assertExeUntouched(t, exe)
+		})
+	}
+}
+
 func TestUpgradeSendsTokenOnSameOriginRequests(t *testing.T) {
 	var auth []string
 	bin := elfBinary(62)
@@ -376,8 +391,32 @@ func TestUpgradeSendsTokenOnSameOriginRequests(t *testing.T) {
 	if err := Upgrade(context.Background(), opts); err != nil {
 		t.Fatal(err)
 	}
-	if len(auth) != 2 || auth[0] != "token s3cret" || auth[1] != "token s3cret" {
+	if len(auth) != 2 || auth[0] != "Bearer s3cret" || auth[1] != "Bearer s3cret" {
 		t.Fatalf("auth headers = %v", auth)
+	}
+}
+
+// API url 缺失时兜底 browser_download_url（同源场景）。
+func TestUpgradeBrowserURLFallback(t *testing.T) {
+	bin := elfBinary(62)
+	archive := tarGz(t, "gitweb", bin)
+	mux := http.NewServeMux()
+	var srv *httptest.Server
+	mux.HandleFunc("/repos/o/r/releases/latest", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{
+			"tag_name": "v9.9.9",
+			"assets": []map[string]string{{
+				"name":                 "gitweb-linux-amd64.tar.gz",
+				"browser_download_url": srv.URL + "/download/v9.9.9/asset",
+			}},
+		})
+	})
+	mux.HandleFunc("/download/", func(w http.ResponseWriter, r *http.Request) { w.Write(archive) })
+	srv = httptest.NewTLSServer(mux)
+	t.Cleanup(srv.Close)
+	exe, _ := writeExe(t, "gitweb")
+	if err := Upgrade(context.Background(), upgradeOpts(srv, exe, "linux", "amd64")); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -391,8 +430,8 @@ func TestUpgradeForeignAssetURLRejected(t *testing.T) {
 	t.Cleanup(foreign.Close)
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/api/v1/repos/o/r/releases/latest", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, `{"tag_name":"v9.9.9","assets":[{"name":"gitweb-linux-amd64.tar.gz","browser_download_url":%q}]}`,
+	mux.HandleFunc("/repos/o/r/releases/latest", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, `{"tag_name":"v9.9.9","assets":[{"name":"gitweb-linux-amd64.tar.gz","url":%q}]}`,
 			foreign.URL+"/v9.9.9/asset.tar.gz")
 	})
 	api := httptest.NewTLSServer(mux)
@@ -412,8 +451,8 @@ func TestUpgradeForeignAssetURLRejected(t *testing.T) {
 	assertExeUntouched(t, exe)
 }
 
-// 重定向每一跳都校验：跨主机、同主机换端口、HTTPS 降级都必须拒绝，
-// 且错误不泄漏目标 URL/tag；同源重定向正常跟随并保留凭据。
+// 重定向每一跳都校验：跨主机（白名单外）、同主机换端口、HTTPS 降级都必须
+// 拒绝，且错误不泄漏目标 URL/tag；同源重定向正常跟随并保留凭据。
 func TestUpgradeRedirectPolicy(t *testing.T) {
 	bin := elfBinary(62)
 	archive := tarGz(t, "gitweb", bin)
@@ -424,8 +463,8 @@ func TestUpgradeRedirectPolicy(t *testing.T) {
 			json.NewEncoder(w).Encode(map[string]any{
 				"tag_name": "v9.9.9",
 				"assets": []map[string]string{{
-					"name":                 "gitweb-linux-amd64.tar.gz",
-					"browser_download_url": srvURL() + "/download/v9.9.9/asset",
+					"name": "gitweb-linux-amd64.tar.gz",
+					"url":  srvURL() + "/download/v9.9.9/asset",
 				}},
 			})
 		}
@@ -435,12 +474,12 @@ func TestUpgradeRedirectPolicy(t *testing.T) {
 		var auth []string
 		mux := http.NewServeMux()
 		var srv *httptest.Server
-		mux.HandleFunc("/api/v1/repos/o/r/releases/latest", func(w http.ResponseWriter, r *http.Request) {
+		mux.HandleFunc("/repos/o/r/releases/latest", func(w http.ResponseWriter, r *http.Request) {
 			json.NewEncoder(w).Encode(map[string]any{
 				"tag_name": "v9.9.9",
 				"assets": []map[string]string{{
-					"name":                 "gitweb-linux-amd64.tar.gz",
-					"browser_download_url": srv.URL + "/download/redirect/v9.9.9/asset",
+					"name": "gitweb-linux-amd64.tar.gz",
+					"url":  srv.URL + "/download/redirect/v9.9.9/asset",
 				}},
 			})
 		})
@@ -460,7 +499,7 @@ func TestUpgradeRedirectPolicy(t *testing.T) {
 		if err := Upgrade(context.Background(), opts); err != nil {
 			t.Fatal(err)
 		}
-		if len(auth) != 1 || auth[0] != "token s3cret" {
+		if len(auth) != 1 || auth[0] != "Bearer s3cret" {
 			t.Fatalf("token lost on same-origin redirect: %v", auth)
 		}
 	})
@@ -474,7 +513,7 @@ func TestUpgradeRedirectPolicy(t *testing.T) {
 		t.Cleanup(foreign.Close)
 		mux := http.NewServeMux()
 		var srv *httptest.Server
-		mux.HandleFunc("/api/v1/repos/o/r/releases/latest", assetAPI(func() string { return srv.URL }))
+		mux.HandleFunc("/repos/o/r/releases/latest", assetAPI(func() string { return srv.URL }))
 		mux.HandleFunc("/download/", func(w http.ResponseWriter, r *http.Request) {
 			http.Redirect(w, r, foreign.URL+"/v9.9.9/asset", http.StatusFound)
 		})
@@ -501,7 +540,7 @@ func TestUpgradeRedirectPolicy(t *testing.T) {
 		t.Cleanup(other.Close)
 		mux := http.NewServeMux()
 		var srv *httptest.Server
-		mux.HandleFunc("/api/v1/repos/o/r/releases/latest", assetAPI(func() string { return srv.URL }))
+		mux.HandleFunc("/repos/o/r/releases/latest", assetAPI(func() string { return srv.URL }))
 		mux.HandleFunc("/download/", func(w http.ResponseWriter, r *http.Request) {
 			// 同主机名、不同端口 —— 有效端口变化也算跨源。
 			target := "https://" + other.Listener.Addr().String() + "/v9.9.9/asset"
@@ -525,7 +564,7 @@ func TestUpgradeRedirectPolicy(t *testing.T) {
 		t.Cleanup(plain.Close)
 		mux := http.NewServeMux()
 		var srv *httptest.Server
-		mux.HandleFunc("/api/v1/repos/o/r/releases/latest", assetAPI(func() string { return srv.URL }))
+		mux.HandleFunc("/repos/o/r/releases/latest", assetAPI(func() string { return srv.URL }))
 		mux.HandleFunc("/download/", func(w http.ResponseWriter, r *http.Request) {
 			http.Redirect(w, r, plain.URL+"/v9.9.9/asset", http.StatusFound)
 		})
@@ -542,24 +581,78 @@ func TestUpgradeRedirectPolicy(t *testing.T) {
 }
 
 func TestSameOrigin(t *testing.T) {
-	base, _ := url.Parse("https://git.epurs.com")
+	base, _ := url.Parse("https://api.github.com")
 	for _, tc := range []struct {
 		target string
 		want   bool
 	}{
-		{"https://git.epurs.com/a", true},
-		{"https://git.epurs.com:443/a", true},
-		{"https://sub.git.epurs.com/a", false},
-		{"https://git.epurs.com.evil.com/a", false},
+		{"https://api.github.com/a", true},
+		{"https://api.github.com:443/a", true},
+		{"https://sub.api.github.com/a", false},
+		{"https://api.github.com.evil.com/a", false},
 		{"https://evil.com/a", false},
-		{"https://git.epurs.com:8443/a", false},
-		{"http://git.epurs.com/a", false},
+		{"https://api.github.com:8443/a", false},
+		{"http://api.github.com/a", false},
 	} {
 		u, _ := url.Parse(tc.target)
 		if got := sameOrigin(base, u); got != tc.want {
 			t.Errorf("sameOrigin(%s) = %v, want %v", tc.target, got, tc.want)
 		}
 	}
+}
+
+// asset 链路白名单与重定向策略的单元验证：GitHub CDN 域名放行但剥离
+// Authorization，白名单外/降级/非默认端口拒绝，跳数封顶。
+func TestRedirectPolicyUnit(t *testing.T) {
+	base, _ := url.Parse("https://api.github.com")
+	policy := redirectPolicy(base)
+
+	check := func(rawURL string, via int) (*http.Request, error) {
+		req, _ := http.NewRequest(http.MethodGet, rawURL, nil)
+		req.Header.Set("Authorization", "Bearer s3cret")
+		err := policy(req, make([]*http.Request, via))
+		return req, err
+	}
+
+	t.Run("same-origin keeps token", func(t *testing.T) {
+		req, err := check("https://api.github.com/repos/o/r/releases/assets/1", 0)
+		if err != nil || req.Header.Get("Authorization") != "Bearer s3cret" {
+			t.Fatalf("same-origin hop must keep token: %v", err)
+		}
+	})
+	for _, host := range []string{
+		"objects.githubusercontent.com",
+		"release-assets.githubusercontent.com",
+		"github-releases.githubusercontent.com",
+		"github.com",
+	} {
+		t.Run("cdn host allowed without token: "+host, func(t *testing.T) {
+			req, err := check("https://"+host+"/signed/path", 1)
+			if err != nil {
+				t.Fatalf("GitHub asset CDN host must be allowed: %v", err)
+			}
+			if req.Header.Get("Authorization") != "" {
+				t.Fatal("token must be stripped on cross-origin hop")
+			}
+		})
+	}
+	for _, rawURL := range []string{
+		"https://evil.com/asset",
+		"https://objects.githubusercontent.com.evil.com/asset",
+		"https://objects.githubusercontent.com:8443/asset",
+		"http://objects.githubusercontent.com/asset",
+	} {
+		t.Run("rejected: "+rawURL, func(t *testing.T) {
+			if _, err := check(rawURL, 1); !errors.Is(err, errCrossOrigin) {
+				t.Fatalf("expected cross-origin rejection, got: %v", err)
+			}
+		})
+	}
+	t.Run("hop cap", func(t *testing.T) {
+		if _, err := check("https://api.github.com/a", maxRedirects); !errors.Is(err, errTooManyRedirects) {
+			t.Fatalf("expected redirect cap, got: %v", err)
+		}
+	})
 }
 
 // 网络错误不得经 url.Error 泄漏含 tag 的 URL：连接失败与下载中途断连都测。
@@ -583,12 +676,12 @@ func TestUpgradeNetworkErrorsOmitURL(t *testing.T) {
 	t.Run("asset connection reset mid-download", func(t *testing.T) {
 		mux := http.NewServeMux()
 		var srv *httptest.Server
-		mux.HandleFunc("/api/v1/repos/o/r/releases/latest", func(w http.ResponseWriter, r *http.Request) {
+		mux.HandleFunc("/repos/o/r/releases/latest", func(w http.ResponseWriter, r *http.Request) {
 			json.NewEncoder(w).Encode(map[string]any{
 				"tag_name": "v9.9.9",
 				"assets": []map[string]string{{
-					"name":                 "gitweb-linux-amd64.tar.gz",
-					"browser_download_url": srv.URL + "/download/v9.9.9/asset",
+					"name": "gitweb-linux-amd64.tar.gz",
+					"url":  srv.URL + "/download/v9.9.9/asset",
 				}},
 			})
 		})
@@ -613,123 +706,17 @@ func TestUpgradeNetworkErrorsOmitURL(t *testing.T) {
 	})
 }
 
-// Windows 回滚注入：第二次 rename 失败 → 回滚成功，原文件恢复；
-// 回滚也失败 → .old 保留为唯一副本，错误按 .old 命名约定告知备份位置，
-// 但不打印具体路径（安装目录可能含版本号）。
-func TestUpgradeWindowsRollback(t *testing.T) {
-	bin := peBinary(0x8664)
-	srv := newReleaseServer(t, releaseServer{assetFile: "gitweb-windows-amd64.tar.gz", archive: tarGz(t, "gitweb.exe", bin)})
-	realRename := os.Rename
-	t.Cleanup(func() { renameFn = realRename })
-
-	t.Run("rollback succeeds", func(t *testing.T) {
-		exe, dir := writeExe(t, "gitweb.exe")
-		calls := 0
-		renameFn = func(old, new string) error {
-			calls++
-			if calls == 2 { // exe→.old 成功后的 tmp→exe
-				return errors.New("injected rename failure")
-			}
-			return realRename(old, new)
-		}
-		err := Upgrade(context.Background(), upgradeOpts(srv, exe, "windows", "amd64"))
-		if err == nil || !strings.Contains(err.Error(), "restored") {
-			t.Fatalf("expected rollback-success error, got: %v", err)
-		}
-		assertExeUntouched(t, exe)
-		entries, _ := os.ReadDir(dir)
-		if len(entries) != 1 {
-			t.Fatalf("temp/backup files left behind: %v", entries)
-		}
-	})
-
-	t.Run("rollback fails keeps backup", func(t *testing.T) {
-		exe, _ := writeExe(t, "gitweb.exe")
-		calls := 0
-		renameFn = func(old, new string) error {
-			calls++
-			if calls >= 2 { // tmp→exe 与回滚都失败
-				return errors.New("injected rename failure")
-			}
-			return realRename(old, new)
-		}
-		err := Upgrade(context.Background(), upgradeOpts(srv, exe, "windows", "amd64"))
-		if err == nil || !strings.Contains(err.Error(), ".old") {
-			t.Fatalf("error must mention the .old backup convention, got: %v", err)
-		}
-		if strings.Contains(err.Error(), exe) {
-			t.Fatalf("error leaks the executable path: %v", err)
-		}
-		assertNoVersionLeak(t, err)
-		if _, statErr := os.Stat(exe); !errors.Is(statErr, os.ErrNotExist) {
-			t.Fatal("exe should be missing in this scenario")
-		}
-		backup, readErr := os.ReadFile(exe + ".old")
-		if readErr != nil || string(backup) != "old binary" {
-			t.Fatalf(".old must survive as the only recoverable copy: %q, %v", backup, readErr)
-		}
-	})
-}
-
-// 中断恢复：exe 缺失、.old 存在（上次升级在两次 rename 之间崩溃）→ 先恢复再升级。
-func TestUpgradeWindowsCrashRecovery(t *testing.T) {
-	bin := peBinary(0x8664)
-	srv := newReleaseServer(t, releaseServer{assetFile: "gitweb-windows-amd64.tar.gz", archive: tarGz(t, "gitweb.exe", bin)})
-	exe, _ := writeExe(t, "gitweb.exe")
-	if err := os.Rename(exe, exe+".old"); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := Upgrade(context.Background(), upgradeOpts(srv, exe, "windows", "amd64")); err != nil {
-		t.Fatal(err)
-	}
-	got, _ := os.ReadFile(exe)
-	if !bytes.Equal(got, bin) {
-		t.Fatal("executable not replaced after crash recovery")
-	}
-	backup, _ := os.ReadFile(exe + ".old")
-	if string(backup) != "old binary" {
-		t.Fatal("recovered original should now be the .old backup")
-	}
-}
-
-func TestVerifyBinary(t *testing.T) {
-	for _, tc := range []struct {
-		goos, goarch string
-		bin          []byte
-		ok           bool
-	}{
-		{"linux", "amd64", elfBinary(62), true},
-		{"linux", "arm64", elfBinary(183), true},
-		{"linux", "amd64", elfBinary(183), false},
-		{"linux", "amd64", elfBinary(62)[:10], false},
-		{"linux", "amd64", elfBinary(62)[:64], false}, // 只有头字段
-		{"windows", "amd64", peBinary(0x8664), true},
-		{"windows", "arm64", peBinary(0xaa64), true},
-		{"windows", "amd64", peBinary(0xaa64), false},
-		{"darwin", "amd64", machOBinary(0x01000007), true},
-		{"darwin", "arm64", machOBinary(0x0100000c), true},
-		{"darwin", "arm64", machOBinary(0x01000007), false},
-		{"plan9", "amd64", elfBinary(62), false},
-	} {
-		err := verifyBinary(tc.bin, tc.goos, tc.goarch)
-		if (err == nil) != tc.ok {
-			t.Errorf("verifyBinary(%s/%s) = %v, want ok=%v", tc.goos, tc.goarch, err, tc.ok)
-		}
-	}
-}
-
 // 同源重定向循环：自定义 CheckRedirect 覆盖了 net/http 默认跳数上限，
 // 必须自己封顶，否则会一直转到客户端超时。
 func TestUpgradeRedirectLoop(t *testing.T) {
 	mux := http.NewServeMux()
 	var srv *httptest.Server
-	mux.HandleFunc("/api/v1/repos/o/r/releases/latest", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/repos/o/r/releases/latest", func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]any{
 			"tag_name": "v9.9.9",
 			"assets": []map[string]string{{
-				"name":                 "gitweb-linux-amd64.tar.gz",
-				"browser_download_url": srv.URL + "/download/v9.9.9/loop",
+				"name": "gitweb-linux-amd64.tar.gz",
+				"url":  srv.URL + "/download/v9.9.9/loop",
 			}},
 		})
 	})
@@ -788,12 +775,12 @@ func TestUpgradeGzipBomb(t *testing.T) {
 func TestUpgradeChecksumAssetWithoutURL(t *testing.T) {
 	mux := http.NewServeMux()
 	var srv *httptest.Server
-	mux.HandleFunc("/api/v1/repos/o/r/releases/latest", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/repos/o/r/releases/latest", func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]any{
 			"tag_name": "v9.9.9",
 			"assets": []map[string]string{
-				{"name": "gitweb-linux-amd64.tar.gz", "browser_download_url": srv.URL + "/download/v9.9.9/asset"},
-				{"name": "gitweb-linux-amd64.tar.gz.sha256", "browser_download_url": ""},
+				{"name": "gitweb-linux-amd64.tar.gz", "url": srv.URL + "/download/v9.9.9/asset"},
+				{"name": "gitweb-linux-amd64.tar.gz.sha256", "url": "", "browser_download_url": ""},
 			},
 		})
 	})
@@ -809,38 +796,10 @@ func TestUpgradeChecksumAssetWithoutURL(t *testing.T) {
 	assertExeUntouched(t, exe)
 }
 
-// Windows 中断后的可达恢复入口：原路径已空，用户启动的是 .old 备份本身。
-// Upgrade 必须先把 .old rename 回原名，再把新二进制装到原名位置。
-func TestUpgradeWindowsOldBootRecovery(t *testing.T) {
-	bin := peBinary(0x8664)
-	srv := newReleaseServer(t, releaseServer{assetFile: "gitweb-windows-amd64.tar.gz", archive: tarGz(t, "gitweb.exe", bin)})
-	exe, dir := writeExe(t, "gitweb.exe")
-	if err := os.Rename(exe, exe+".old"); err != nil {
-		t.Fatal(err)
-	}
-
-	// 模拟从 .old 启动：os.Executable() 会解析到 .old 自身。
-	if err := Upgrade(context.Background(), upgradeOpts(srv, exe+".old", "windows", "amd64")); err != nil {
-		t.Fatal(err)
-	}
-	got, err := os.ReadFile(exe)
-	if err != nil || !bytes.Equal(got, bin) {
-		t.Fatalf("original path should hold the new binary: %v", err)
-	}
-	backup, err := os.ReadFile(exe + ".old")
-	if err != nil || string(backup) != "old binary" {
-		t.Fatalf(".old should hold the recovered previous binary: %q, %v", backup, err)
-	}
-	entries, _ := os.ReadDir(dir)
-	if len(entries) != 2 {
-		t.Fatalf("unexpected dir contents: %v", entries)
-	}
-}
-
 // 安装目录含版本号时，文件系统错误不得经 PathError 把目录名/tag 带进日志。
 func TestUpgradeFSErrorsOmitVersionedPath(t *testing.T) {
-	bin := peBinary(0x8664)
-	srv := newReleaseServer(t, releaseServer{assetFile: "gitweb-windows-amd64.tar.gz", archive: tarGz(t, "gitweb.exe", bin)})
+	bin := elfBinary(62)
+	srv := newReleaseServer(t, releaseServer{assetFile: "gitweb-linux-amd64.tar.gz", archive: tarGz(t, "gitweb", bin)})
 	realRename := os.Rename
 	t.Cleanup(func() { renameFn = realRename })
 
@@ -850,7 +809,7 @@ func TestUpgradeFSErrorsOmitVersionedPath(t *testing.T) {
 		if err := os.Mkdir(dir, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		exe := filepath.Join(dir, "gitweb.exe")
+		exe := filepath.Join(dir, "gitweb")
 		if err := os.WriteFile(exe, []byte("old binary"), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -869,37 +828,44 @@ func TestUpgradeFSErrorsOmitVersionedPath(t *testing.T) {
 	}
 
 	t.Run("stat failure", func(t *testing.T) {
-		exe := filepath.Join(filepath.Dir(versionedExe(t)), "missing.exe")
-		err := Upgrade(context.Background(), upgradeOpts(srv, exe, "windows", "amd64"))
+		exe := filepath.Join(filepath.Dir(versionedExe(t)), "missing")
+		err := Upgrade(context.Background(), upgradeOpts(srv, exe, "linux", "amd64"))
 		assertNoPathLeak(t, err, exe)
 	})
 
-	t.Run("rename failure unix", func(t *testing.T) {
+	t.Run("rename failure", func(t *testing.T) {
 		exe := versionedExe(t)
 		renameFn = func(old, new string) error { return errors.New("injected") }
 		err := Upgrade(context.Background(), upgradeOpts(srv, exe, "linux", "amd64"))
 		assertNoPathLeak(t, err, exe)
 		assertExeUntouched(t, exe)
+		entries, _ := os.ReadDir(filepath.Dir(exe))
+		if len(entries) != 1 {
+			t.Fatalf("temp files left behind: %v", entries)
+		}
 	})
+}
 
-	t.Run("rollback failure windows", func(t *testing.T) {
-		exe := versionedExe(t)
-		calls := 0
-		renameFn = func(old, new string) error {
-			calls++
-			if calls >= 2 {
-				return errors.New("injected")
-			}
-			return realRename(old, new)
+func TestVerifyBinary(t *testing.T) {
+	for _, tc := range []struct {
+		goos, goarch string
+		bin          []byte
+		ok           bool
+	}{
+		{"linux", "amd64", elfBinary(62), true},
+		{"linux", "arm64", elfBinary(183), true},
+		{"linux", "amd64", elfBinary(183), false},
+		{"linux", "amd64", elfBinary(62)[:10], false},
+		{"linux", "amd64", elfBinary(62)[:64], false}, // 只有头字段
+		{"darwin", "amd64", machOBinary(0x01000007), true},
+		{"darwin", "arm64", machOBinary(0x0100000c), true},
+		{"darwin", "arm64", machOBinary(0x01000007), false},
+		{"windows", "amd64", elfBinary(62), false}, // Windows 已不支持
+		{"plan9", "amd64", elfBinary(62), false},
+	} {
+		err := verifyBinary(tc.bin, tc.goos, tc.goarch)
+		if (err == nil) != tc.ok {
+			t.Errorf("verifyBinary(%s/%s) = %v, want ok=%v", tc.goos, tc.goarch, err, tc.ok)
 		}
-		err := Upgrade(context.Background(), upgradeOpts(srv, exe, "windows", "amd64"))
-		assertNoPathLeak(t, err, exe)
-		if !strings.Contains(err.Error(), ".old") {
-			t.Fatalf("error must mention the .old backup convention: %v", err)
-		}
-		backup, readErr := os.ReadFile(exe + ".old")
-		if readErr != nil || string(backup) != "old binary" {
-			t.Fatalf(".old must survive as the only recoverable copy: %q, %v", backup, readErr)
-		}
-	})
+	}
 }

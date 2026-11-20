@@ -69,30 +69,25 @@ docker run -d -p 8080:8080 -v gitweb-state:/data gitweb
 gitweb upgrade
 ```
 
-从源仓库所在的 Gitea 实例下载最新 release 并替换当前二进制。更新链路仅 HTTPS：API 请求、asset 下载与每一跳重定向都必须严格同源（scheme、主机、端口全等），降级与跨源目标一律拒绝。
+从源仓库的 GitHub Releases 下载最新 release 并替换当前二进制。目标平台为 Linux/macOS（amd64/arm64），不支持 Windows。更新链路仅 HTTPS：API 源站（`api.github.com`）严格同源；asset 统一走 API asset 端点下载（公开与私有仓库行为一致），重定向只放行同源或固定的 GitHub 资产 CDN 域名（端口限 443），降级与白名单外的目标一律拒绝，跳数有上限。token 只发往 API 源站，跨源重定向跳会剥离凭据。
 
-替换前先校验下载产物：归档完整性（gzip 尾部校验和必查）、可执行格式、架构与头部表边界；若 release 附带 `<asset>.sha256` 校验和 asset 则强制比对。校验的边界要说清楚：**没有校验和时，实际检查的只有 gzip CRC、部分可执行结构和 TLS 传输链路，不保证文件完整、可运行**；即使有校验和，它与二进制来自同一源站，防的是传输损坏与源站被篡改后的不一致，**不是独立的发布者签名**。下载或校验的任何一步失败都保持原文件不动。
+替换前先校验下载产物：归档完整性（gzip 尾部校验和必查）、可执行格式、架构与头部表边界；GitHub API 若返回 `digest` 字段（sha256）则强制比对，否则 release 附带 `<asset>.sha256` 校验和 asset 时强制比对。校验的边界要说清楚：**两者都没有时，实际检查的只有 gzip CRC、部分可执行结构和 TLS 传输链路，不保证文件完整、可运行**；digest/校验和与二进制来自同一 API，防的是传输损坏，**不是独立的发布者签名**。下载或校验的任何一步失败都保持原文件不动。
 
-替换方式因平台而异：
+替换方式：新二进制先写入可执行文件同目录的临时文件，再 rename 原子覆盖，运行中的进程不受影响。替换完成后重启 gitweb 即运行新二进制。
 
-- **Linux/macOS**：rename 原子覆盖旧二进制，运行中的进程不受影响。
-- **Windows**：运行中的可执行文件无法覆盖，先把旧文件 rename 为 `<binary>.old`，再让新文件就位。这*不是*原子操作：第二步失败会回滚旧文件；回滚也失败时保留 `.old` 备份。若升级恰好在两次 rename 之间被中断，原文件名会缺失，恢复方式二选一：
-  1. 手动把同目录下的 `gitweb.exe.old` 重命名回 `gitweb.exe` —— 不依赖网络，随时可用；
-  2. 运行备份：`gitweb.exe.old upgrade` —— 本次升级成功时会顺带把备份还原回原名。注意还原发生在下载与校验全部通过之后：升级失败（比如源站上没有可用 release）时不会做任何还原，此时请用方式 1。
-
-  升级成功后 `.old` 备份保留到下次升级确认可执行文件存在为止。
-
-为满足「任何输出不含版本号」的约定，升级失败的报错只有固定分类文案，不携带路径、URL 或底层系统错误 —— 安装目录和下载链接都可能含版本号。代价是报错里拿不到具体路径；备份位置按约定告知：永远是可执行文件同目录下的 `<可执行文件名>.old`。
-
-替换完成后重启 gitweb 即运行新二进制。
-
-发布仓库为私有，需通过环境变量提供 Gitea access token：
+源仓库为私有时，需通过环境变量提供 GitHub access token：
 
 ```bash
-GITWEB_UPGRADE_TOKEN=<token> gitweb upgrade
+GITHUB_TOKEN=<token> gitweb upgrade
 ```
 
-该命令只做更新替换，不输出任何版本信息。
+源仓库默认 `fimreal/gitweb`，可用环境变量覆盖：
+
+```bash
+GITWEB_UPGRADE_REPO=<owner>/<repo> gitweb upgrade
+```
+
+该命令只做更新替换，不输出任何版本信息。为满足「任何输出不含版本号」的约定，升级失败的报错只有固定分类文案，不携带路径、URL 或底层系统错误 —— 安装目录和下载链接都可能含版本号。代价是报错里拿不到具体路径。
 
 ## 配置
 
@@ -255,7 +250,7 @@ Gitea 的 `ref` 支持分支、tag、commit SHA 三种。Gitea raw 端点区分�
 - **cache**：内存 LRU + TTL 缓存（hashicorp/golang-lru/v2）
 - **render**：Markdown/HTML/文本 渲染 —— 可渲染文件类型的唯一判定来源
 - **server**：Gin HTTP 服务器，包含路径路由、SSRF 防护、大小限制、CSP
-- **upgrade**：自更新 —— 从源仓库的 Gitea release 下载，仅 HTTPS 严格同源链路，先校验后替换，Windows 带备份与回滚
+- **upgrade**：自更新 —— 从源仓库的 GitHub Releases 下载，仅 HTTPS，token 只发往 API 源站，先校验后 rename 原子替换（linux/darwin）
 
 ## 安全
 
