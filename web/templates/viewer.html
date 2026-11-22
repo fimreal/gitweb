@@ -1814,6 +1814,7 @@
         let resizing = false, resizeStart = 0, resizeStartSize = 0, resizeSide = null;
         function startResize(e) {
             if (!win.classList.contains('docked')) return;
+            if (e.target && e.target.closest && e.target.closest('button')) return; // 点按钮不调尺寸
             const side = pos.dockSide;
             const r = win.getBoundingClientRect();
             // 触屏用更宽的热区，桌面适度放宽
@@ -1854,11 +1855,17 @@
             if (side === 'left' || side === 'right') savePos({ dockW: win.offsetWidth });
             else if (side === 'bottom') savePos({ dockH: win.offsetHeight });
         });
-        // 触屏 resize
+        // 触屏 resize：只认直接落在窗口本体上的触摸（边缘 ::after 热区/边框，
+        // 伪元素命中会报告宿主元素）。落在标题栏/文件树等内容子元素上的触摸
+        // 一律不进 resize，否则树内靠边缘的滑动会被 preventDefault 劫持成调宽，
+        // 页面滚不动。热区在触屏上由 CSS 加宽到 16px，配合 docked 的 touch-action:none
+        // 保证热区内手势不被浏览器抢成滚动。
         win.addEventListener('touchstart', e => {
             if (!win.classList.contains('docked')) return;
+            if (e.target !== win) return;
             const t = e.touches[0];
-            startResize({ clientX: t.clientX, clientY: t.clientY, preventDefault: () => e.preventDefault(), stopPropagation: () => e.stopPropagation() });
+            startResize({ clientX: t.clientX, clientY: t.clientY, pointerType: 'touch',
+                          target: e.target, preventDefault: () => {}, stopPropagation: () => e.stopPropagation() });
         }, { capture: true, passive: true });
         document.addEventListener('touchmove', e => {
             if (!resizing) return;
@@ -1885,13 +1892,16 @@
 
         // ---- 停靠态拖拽标题栏 → 撕下来变回浮窗 ----
         // 单独处理，capture 阶段拦截，避免与 makeDraggable（bubble 阶段）冲突。
-        // 第一次移动时 undock 并让浮窗跟手到鼠标位置。
+        // 移动超过 4px 才 undock 并让浮窗跟手：双击手势里 1-2px 的手抖很常见，
+        // 无阈值会把"双击停靠/退出"误判成撕下，布局来回跳。
         let dockTearing = false, tearOX = 0, tearOY = 0, tearFired = false;
+        let tearStartX = 0, tearStartY = 0, tearMoved = false;
         function startTear(clientX, clientY) {
             if (!win.classList.contains('docked')) return false;
             const r = win.getBoundingClientRect();
             tearOX = clientX - r.left;
             tearOY = clientY - r.top;
+            tearStartX = clientX; tearStartY = clientY;
             tearFired = false;
             dockTearing = true;
             return true;
@@ -1899,10 +1909,12 @@
         function moveTear(clientX, clientY) {
             if (!dockTearing) return;
             if (!tearFired) {
-                // 首次移动：退出停靠，浮窗跳到鼠标下跟手
+                if (Math.abs(clientX - tearStartX) <= 4 && Math.abs(clientY - tearStartY) <= 4) return;
+                // 首次有效移动：退出停靠，浮窗跳到鼠标下跟手
                 undock(clientX - tearOX, clientY - tearOY);
                 win.classList.add('dragging');
                 tearFired = true;
+                tearMoved = true;
             }
             win.style.left = (clientX - tearOX) + 'px';
             win.style.top = (clientY - tearOY) + 'px';
@@ -1912,6 +1924,8 @@
             if (!dockTearing) return;
             dockTearing = false;
             win.classList.remove('dragging');
+            // 撕下后的落点才是最终位置：undock 时存的是起手点，这里补存终态
+            if (tearFired) savePos({ winLeft: parseFloat(win.style.left), winTop: parseFloat(win.style.top) });
         }
         titlebar.addEventListener('mousedown', e => {
             if (e.target.closest('button')) return;       // 点按钮（如"-"）不撕
@@ -1978,11 +1992,14 @@
             });
         }
 
-        // ---- 双击标题栏 → 停靠到左侧（默认）；停靠态双击 → 退出停靠 ----
+        // ---- 双击标题栏 → 停靠（竖屏底部 / 横屏左侧）；停靠态双击 → 退出停靠 ----
         // 单击标题栏仍走 makeDraggable 的拖拽逻辑（不冲突：dblclick 是独立事件）。
         let lastTitleClick = 0;
         titlebar.addEventListener('click', e => {
             if (e.target.closest('button')) return; // 点按钮不算
+            // 刚完成一次"撕下浮窗"拖拽：松手带出的 click 不参与双击计数，
+            // 否则拖完紧接一次单击会被误判成双击又停靠回去。
+            if (tearMoved) { tearMoved = false; lastTitleClick = 0; return; }
             const now = Date.now();
             if (now - lastTitleClick < 350) {
                 // 双击
@@ -1990,7 +2007,7 @@
                 e.stopPropagation();
                 lastTitleClick = 0;
                 if (win.classList.contains('docked')) undock();
-                else dockTo('left');
+                else dockTo(isPortrait() ? 'bottom' : 'left');
             } else {
                 lastTitleClick = now;
             }
