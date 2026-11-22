@@ -429,16 +429,14 @@ body {
     resize: both;
     min-width: 220px;
     min-height: 180px;
-    /* 过渡合成器属性 + 圆角 + 尺寸/位置：最小化/还原动画依赖 width/height/left/top
-       真实过渡，保证动画开始就是当前展开窗口的真实样子，缩小过程中尺寸/位置/圆角
-       平滑渐变到浮岛形态，不会有 FLIP scale 放大导致的"大框体闪过"或"对不上位置"。 */
-    transition: width 0.34s var(--ease-apple), height 0.34s var(--ease-apple),
-                left 0.34s var(--ease-apple), top 0.34s var(--ease-apple),
-                right 0.34s var(--ease-apple), bottom 0.34s var(--ease-apple),
-                box-shadow 0.28s var(--ease-apple), opacity 0.28s var(--ease-apple),
+    /* 基础态只过渡合成器友好属性。width/height/left/top 的真实过渡由 .morphing
+       按需启用（最小化/还原动画）：常驻几何过渡会让原生 resize 句柄和停靠态
+       边缘拖拽跟手滞后，松手后宽度还继续"自己爬"，且 mouseup 时 offsetWidth
+       读到的是动画中间值，持久化尺寸随之出错。 */
+    transition: box-shadow 0.28s var(--ease-apple), opacity 0.28s var(--ease-apple),
                 border-radius 0.34s var(--ease-apple), background 0.34s var(--ease-apple);
     transform: translateZ(0);
-    will-change: transform, opacity, width, height, left, top;
+    will-change: transform, opacity;
     animation: win-pop 0.32s var(--ease-apple);
 }
 @keyframes win-pop {
@@ -723,6 +721,9 @@ body {
     background: var(--bg);
     border: none;
     box-shadow: none;
+    /* 直接命中窗口本体（边缘热区/标题栏）的触摸交给 JS 拖拽，不让浏览器先抢成滚动。
+       文件树内容自己是滚动容器，touch-action 判定链到它即止，树内滚动不受影响。 */
+    touch-action: none;
 }
 .floating-tree-window.docked .floating-tree-titlebar { cursor: grab; }
 .floating-tree-window.docked .min-dock { display: none; }
@@ -783,7 +784,8 @@ body {
 .floating-tree-window.docked .floating-tree-titlebar:active { cursor: grabbing; }
 
 /* 停靠态拖拽热区：用一个透明 ::after 贴在可拖拽边缘，hover 时显 cursor。
-   不影响布局，仅作为命中区与视觉提示。 */
+   不影响布局，仅作为命中区与视觉提示。窗口 overflow:hidden 会裁掉超出边缘的
+   部分（含命中区），所以热区完全放在边缘内侧，不做 translate 偏移。 */
 .floating-tree-window.docked::after {
     content: '';
     position: absolute;
@@ -792,9 +794,15 @@ body {
     background: transparent;
     transition: background 0.15s ease;
 }
-.floating-tree-window.docked-left::after  { top: 0; right: 0; bottom: 0; width: 7px; cursor: ew-resize; transform: translateX(3px); }
-.floating-tree-window.docked-right::after  { top: 0; left: 0; bottom: 0; width: 7px; cursor: ew-resize; transform: translateX(-3px); }
-.floating-tree-window.docked-bottom::after{ left: 0; right: 0; top: 0; height: 7px; cursor: ns-resize; transform: translateY(-3px); }
+.floating-tree-window.docked-left::after  { top: 0; right: 0; bottom: 0; width: 7px; cursor: ew-resize; }
+.floating-tree-window.docked-right::after  { top: 0; left: 0; bottom: 0; width: 7px; cursor: ew-resize; }
+.floating-tree-window.docked-bottom::after{ left: 0; right: 0; top: 0; height: 7px; cursor: ns-resize; }
+/* 触屏没有 hover 提示，热区加宽到 16px 才好抓 */
+@media (pointer: coarse) {
+    .floating-tree-window.docked-left::after,
+    .floating-tree-window.docked-right::after { width: 16px; }
+    .floating-tree-window.docked-bottom::after { height: 16px; }
+}
 .floating-tree-window.docked-left:hover::after,
 .floating-tree-window.docked-right:hover::after { background: var(--accent-soft); }
 .floating-tree-window.docked-bottom:hover::after { background: var(--accent-soft); }
