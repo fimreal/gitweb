@@ -79,6 +79,13 @@ func TestEveryPageIncludesSharedHead(t *testing.T) {
 						t.Errorf("index.html 缺少 GitHub 仓库入口 %q", want)
 					}
 				}
+			case "viewer.html":
+				// 文件目录的搜索入口必须挂在浮窗内，否则搜索没有承载的 UI
+				for _, want := range []string{`id="tree-search"`, `id="tree-search-clear"`} {
+					if !strings.Contains(body, want) {
+						t.Errorf("viewer.html 缺少文件搜索控件 %q", want)
+					}
+				}
 			}
 			assertAssetsResolve(t, r, body)
 		})

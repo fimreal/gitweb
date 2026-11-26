@@ -29,6 +29,19 @@
                 </button>
             </div>
         </div>
+        <!-- 文件搜索：输入即按路径过滤（空串回到目录树）。结果平铺显示，点选行为与树内文件行一致。 -->
+        <div class="floating-tree-search" id="floating-tree-search">
+            <svg class="ft-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+            <input type="search" id="tree-search" class="ft-search-input" autocomplete="off" autocapitalize="off" spellcheck="false"
+                   placeholder="搜索文件..."
+                   data-en-placeholder="Search files..."
+                   data-zh-placeholder="搜索文件..."
+                   aria-label="搜索文件">
+            <button class="ft-search-clear" id="tree-search-clear" type="button" hidden title="清空搜索"
+                    data-en-title="Clear search" data-zh-title="清空搜索" aria-label="清空搜索">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+            </button>
+        </div>
         <!-- 迷你浮岛态：居中显示的图标（可拖动、贴边吸附） -->
         <div class="min-dock" id="min-dock" title="点击展开 · 拖到边缘吸附">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -415,7 +428,7 @@
         btn.addEventListener('click', () => {
             showHidden = !showHidden;
             updateHiddenFilesBtn();
-            renderTree(visibleFiles());
+            renderFilteredTree();
         });
     }
 
@@ -1068,7 +1081,7 @@
             }
             const data = await resp.json();
             allFiles = data.files || [];
-            renderTree(visibleFiles());
+            renderFilteredTree();
         } catch (err) {
             allFiles = []; // 清空旧分支文件列表，避免 autoOpenDefault 用过期列表发请求
             const msg = zh ? '加载文件树失败: ' + err.message : 'Failed to load tree: ' + err.message;
@@ -1142,6 +1155,80 @@
                 }
             });
         });
+    }
+
+    // ---------- 文件搜索 ----------
+    // 只在已拉到的文件列表上做前端过滤：不为搜索多打接口，输入即出结果。
+    // 空串回到目录树，非空串平铺展示命中文件（带上完整路径，避免同名文件分不清）。
+    let treeQuery = '';
+
+    // 命中片段高亮：下标按小写副本定位，切片仍取原串，大小写保持原样。
+    function highlightPath(path, needle) {
+        const lower = path.toLowerCase();
+        let out = '';
+        let from = 0;
+        let at = lower.indexOf(needle);
+        while (at !== -1) {
+            out += escapeHtml(path.slice(from, at))
+                + '<mark class="ft-mark">' + escapeHtml(path.slice(at, at + needle.length)) + '</mark>';
+            from = at + needle.length;
+            at = lower.indexOf(needle, from);
+        }
+        return out + escapeHtml(path.slice(from));
+    }
+
+    function renderSearchResults(files, query) {
+        const container = document.getElementById('floating-tree-content');
+        if (!container) return;
+        const needle = query.toLowerCase();
+        const matches = files
+            .filter(f => f.path.toLowerCase().indexOf(needle) !== -1)
+            .sort((a, b) => a.path.localeCompare(b.path));
+        if (!matches.length) {
+            container.innerHTML = '<div class="tree-empty">' + (currentLang === 'zh' ? '没有匹配的文件' : 'No matching files') + '</div>';
+            return;
+        }
+        container.innerHTML = matches.map(f =>
+            '<div class="file-item search-hit" data-path="' + escapeHtml(f.path) + '" title="' + escapeHtml(f.path) + '">'
+            + ICON.chevronSpacer + '<span class="file-icon">' + ICON.file + '</span>'
+            + '<span class="file-name">' + highlightPath(f.path, needle) + '</span>'
+            + '<span class="file-size">' + (f.size > 0 ? formatSize(f.size) : '') + '</span></div>'
+        ).join('');
+        attachTreeEvents();
+        markCachedRows(); // 与目录树一样，行重建后要重打缓存标记
+    }
+
+    // 树与搜索结果共用一个入口：切隐藏文件、刷新、换分支后当前关键词继续生效。
+    function renderFilteredTree() {
+        const files = visibleFiles();
+        if (treeQuery) renderSearchResults(files, treeQuery);
+        else renderTree(files);
+    }
+
+    function initTreeSearch() {
+        const input = document.getElementById('tree-search');
+        const clear = document.getElementById('tree-search-clear');
+        if (!input) return;
+        let timer = null;
+        const sync = () => {
+            treeQuery = input.value.trim();
+            if (clear) clear.hidden = input.value.length === 0;
+            renderFilteredTree();
+        };
+        input.addEventListener('input', () => {
+            clearTimeout(timer);
+            timer = setTimeout(sync, 120); // 连打时不逐键重建整棵树
+        });
+        // 输入框内按键不冒泡：Escape 在全局还会关设置菜单/分支菜单，这里要自己消费掉
+        input.addEventListener('keydown', (e) => {
+            e.stopPropagation();
+            if (e.key === 'Escape') {
+                clearTimeout(timer);
+                input.value = '';
+                sync();
+            }
+        });
+        if (clear) clear.addEventListener('click', () => { input.value = ''; sync(); input.focus(); });
     }
 
     // ---------- 内容区等待标签 ----------
@@ -2388,6 +2475,7 @@
     // ---------- 启动 ----------
     document.addEventListener('DOMContentLoaded', () => {
         initFloatingTree();
+        initTreeSearch();
         initAutoHideHeader();
         initBranchSwitcher();
         restoreAuthFromLocal();
