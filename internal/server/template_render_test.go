@@ -71,6 +71,15 @@ func TestEveryPageIncludesSharedHead(t *testing.T) {
 					t.Errorf("%s 不该出现 controls 片段", tc.name)
 				}
 			}
+			switch tc.name {
+			case "index.html":
+				// 右上角要能一键跳到 GitHub 仓库（与主题/语言按钮同一排）
+				for _, want := range []string{`href="https://github.com/fimreal/gitweb"`, `class="icon-btn github-link"`} {
+					if !strings.Contains(body, want) {
+						t.Errorf("index.html 缺少 GitHub 仓库入口 %q", want)
+					}
+				}
+			}
 			assertAssetsResolve(t, r, body)
 		})
 	}

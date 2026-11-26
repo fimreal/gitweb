@@ -64,6 +64,9 @@ body {
     border-color: var(--accent-soft);
 }
 .icon-btn:active { transform: translateY(0) scale(0.96); }
+/* 首页右上角 GitHub 仓库入口：与主题/语言按钮同款圆形按钮，只是 <a> 不是 <button> */
+.icon-btn.github-link { text-decoration: none; }
+.icon-btn.github-link svg { width: 17px; height: 17px; }
 
 /* ---------- 主内容 ---------- */
 .hero-content {
