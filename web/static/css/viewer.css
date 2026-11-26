@@ -465,6 +465,7 @@ body {
      · 还原（restore）：图标初始可见（小浮岛态本就显示）→ 开场 Play 加 morphing-icon-out
        随窗口放大快速淡出，避免图标被 scale 放大又突然消失。 */
 .floating-tree-window.morphing .floating-tree-titlebar,
+.floating-tree-window.morphing .floating-tree-search,
 .floating-tree-window.morphing .floating-tree-content {
     transition: opacity 0.22s var(--ease-apple);
     opacity: 0;
@@ -500,6 +501,7 @@ body {
    → 靠近/离开吸附区时 scale 平滑变化，不跳变。未吸附时给一点捏合手感。 */
 .floating-tree-window.minimized.dragging:not(.snapped) { transform: scale(0.94); }
 .floating-tree-window.minimized .floating-tree-titlebar,
+.floating-tree-window.minimized .floating-tree-search,
 .floating-tree-window.minimized .floating-tree-content { display: none; }
 .floating-tree-window.minimized .min-dock { display: flex; }
 .floating-tree-window.minimized:hover {
@@ -607,6 +609,70 @@ body {
 @keyframes ft-spin { from { transform: rotate(0deg); } to { transform: rotate(-360deg); } }
 @media (prefers-reduced-motion: reduce) {
     .floating-tree-btn.refresh.spinning svg { animation: none; }
+}
+
+/* ---------- 文件搜索行（标题栏下方，与内容区同宽同底） ---------- */
+.floating-tree-search {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel-bg);
+    flex-shrink: 0;
+}
+.ft-search-icon {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+    color: var(--secondary);
+    opacity: 0.85;
+}
+.ft-search-input {
+    flex: 1;
+    min-width: 0;
+    padding: 5px 8px;
+    font: inherit;
+    font-size: 0.893rem;
+    color: var(--fg);
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    outline: none;
+    transition: border-color 0.15s ease;
+    -webkit-appearance: none;
+    appearance: none;
+}
+.ft-search-input::placeholder { color: var(--secondary); opacity: 0.8; }
+.ft-search-input:focus { border-color: var(--accent); }
+/* 原生 search 清除叉与自定义按钮重复，统一收掉 */
+.ft-search-input::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
+
+.ft-search-clear {
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: var(--secondary);
+    border-radius: 50%;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+.ft-search-clear[hidden] { display: none; }
+.ft-search-clear svg { width: 11px; height: 11px; }
+.ft-search-clear:hover { background: var(--hover-bg); color: var(--fg); }
+
+/* 搜索结果里的命中片段 */
+.ft-mark {
+    background: var(--accent-soft);
+    color: var(--accent);
+    border-radius: 3px;
+    padding: 0 1px;
 }
 
 /* 迷你浮岛态：中间的图标（白色，叠在渐变底上） */
