@@ -11,7 +11,7 @@ Transform git repositories into browsable web pages.
 - **Multiple formats**: Renders `.md`/`.txt`/code as HTML, `.html` in a sandboxed iframe, images inline
 - **Private repositories**: When a repo requires auth, the viewer prompts for a token or username/password at access time. Credentials stay in the browser (sessionStorage) and are sent per-request — never stored on the server
 - **Optional site password**: Set a password in config / via `-password` flag to require login before any page can be accessed. Not set = public (default).
-- **File tree**: Floating, draggable file browser to navigate the repo, with path search that filters as you type. The search box folds into a title-bar toggle; whether it starts open follows the panel's own width (open in narrow docks, closed in the wide bottom bar). See [Finding files](#finding-files).
+- **File tree**: Floating, draggable file browser to navigate the repo, with path search that filters as you type. The search box folds into a title-bar toggle and starts collapsed in every layout. See [Finding files](#finding-files).
 - **Ref switcher**: Settings → Switch ref filters branches and tags on the server while you type, and still accepts a commit SHA. See [Switching refs](#switching-refs).
 - **Single binary**: Web assets (templates, CSS, JS) are embedded into the Go binary via `//go:embed`. The released tarball and Docker image contain only the binary — no external `web/` directory is needed.
 - **In-memory caching**: LRU + TTL cache; fetched file contents are cleared on restart
@@ -67,10 +67,16 @@ Visit `http://localhost:8080` to register repositories.
 ### Self upgrade
 
 ```bash
-gitweb upgrade
+gitweb upgrade                    # confirm, then install the latest release
+gitweb upgrade --version v0.6.1   # install a specific release tag
+gitweb upgrade --yes              # skip the confirmation prompt
 ```
 
-Downloads the latest release from the source repository's GitHub Releases and replaces the current binary. Target platforms are Linux/macOS (amd64/arm64); Windows is not supported. The update channel is HTTPS-only: every hop of an API request stays strictly on the API origin (`api.github.com`) — a cross-origin response can never become the source of release metadata; assets are downloaded through the API asset endpoint (identical behavior for public and private repos), and asset redirects are only allowed to the same origin or a fixed list of GitHub asset CDN hosts (port 443 only) — downgrades and off-list targets are rejected, with an explicit hop cap. The token is only sent to the API origin and is stripped on cross-origin redirect hops.
+Downloads a release from the source repository's GitHub Releases and replaces the current binary. Target platforms are Linux/macOS (amd64/arm64); Windows is not supported. The update channel is HTTPS-only: every hop of an API request stays strictly on the API origin (`api.github.com`) — a cross-origin response can never become the source of release metadata; assets are downloaded through the API asset endpoint (identical behavior for public and private repos), and asset redirects are only allowed to the same origin or a fixed list of GitHub asset CDN hosts (port 443 only) — transport (HTTPS) downgrades and off-list targets are rejected, with an explicit hop cap. The token is only sent to the API origin and is stripped on cross-origin redirect hops.
+
+**Confirmation.** Before anything is downloaded, `upgrade` prints the current version and the target version and asks `Proceed with upgrade? [y/N]`; an empty answer means No. `--yes` / `-y` skips the prompt. When stdin is not a terminal, `upgrade` refuses to run without `--yes` — it never installs on your behalf.
+
+**Specific versions and downgrades.** `--version v1.2.3` selects a release tag instead of `latest`. Pointing it at an older tag is a version downgrade: it is only allowed when you name that tag explicitly, the prompt is labelled `downgrade`, and it still goes through the same download/verification path. If `latest` itself is older than the installed binary, the command refuses and asks you to pass `--version` if you really mean to downgrade. The current version comes from the build: release binaries embed their tag, and a local build reports `dev` (no comparison is attempted then). Note that "downgrade" above is about versions; HTTPS transport downgrade is a separate thing and is always rejected.
 
 Before replacement the download is verified: full archive integrity (the gzip trailer checksum is always checked), executable format, architecture and header-table bounds; the GitHub API's `digest` field (sha256) is verified when present, otherwise a published `<asset>.sha256` checksum asset is verified. Be clear about what this covers: **with neither, only the gzip CRC, partial executable structure and the TLS transport are checked — there is no guarantee the file is complete and runnable**. The digest/checksum comes from the same API as the binary: it guards against transport corruption, but it is **not an independent publisher signature**. Any download or verification failure leaves the existing binary untouched.
 
@@ -88,7 +94,7 @@ The source repository defaults to `fimreal/gitweb` and can be overridden:
 GITWEB_UPGRADE_REPO=<owner>/<repo> gitweb upgrade
 ```
 
-The command only upgrades — it never prints version information. To honor the "no version numbers in any output" rule, upgrade failures report fixed-category messages only — no paths, URLs or underlying system errors, since the install directory and download URLs may contain version numbers. The tradeoff: errors never show concrete paths.
+Version numbers appear in exactly two places: the confirmation prompt (current → target) and the success summary. Failures stay fixed-category — no paths, URLs or underlying system errors, since the install directory and download URLs may contain version numbers. The tradeoff: errors never show concrete paths.
 
 ## Configuration
 
@@ -284,12 +290,10 @@ case-insensitive, matching any part of a path. Matches are listed flat with thei
 and the matched fragment highlighted; clearing the box (or pressing `Esc`) returns to the
 normal tree.
 
-- The magnifier button in the title bar shows and hides the search box. Collapsing also
-  clears the query, so the tree never looks like it is missing files.
-- Whether the box starts open depends on the **width of the panel itself**, not the viewport:
-  a narrow panel (the floating window, or the left/right dock) opens it, the full-width bottom
-  dock starts collapsed. Crossing that width threshold re-applies the default; within one
-  width band your manual toggle sticks.
+- The search box starts collapsed in every layout — floating window, left/right dock, and the
+  bottom bar alike. Click the magnifier button in the title bar to open it; click again (or
+  press `Esc` in the box) to put it away. Collapsing also clears the query, so the tree never
+  looks like it is missing files.
 - The panel keeps its size when the box opens or closes — only the tree area grows or shrinks.
 
 ### Switching refs

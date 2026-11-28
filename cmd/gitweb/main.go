@@ -1,15 +1,19 @@
 package main
 
 import (
+	"bufio"
 	"context"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"io/fs"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"syscall"
 	"time"
@@ -28,8 +32,8 @@ import (
 var version = "dev"
 
 func main() {
-	// upgrade 是唯一的子命令，只做「下载最新版并替换当前二进制」，
-	// 必须在 flag.Parse 之前分发，且任何输出都不携带版本号。
+	// upgrade 是唯一的子命令，必须在 flag.Parse 之前分发。
+	// 版本号只出现在确认提示与成功摘要里，错误信息仍不带路径/URL/底层错误。
 	if len(os.Args) > 1 && os.Args[1] == "upgrade" {
 		runUpgrade(os.Args[2:])
 		return
@@ -46,7 +50,7 @@ func main() {
 	showVersion := flag.Bool("v", false, "print version and exit")
 	flag.Usage = func() {
 		fmt.Fprintln(flag.CommandLine.Output(), "Usage: gitweb [flags]")
-		fmt.Fprintln(flag.CommandLine.Output(), "       gitweb upgrade   (download the latest release and replace this binary)")
+		fmt.Fprintln(flag.CommandLine.Output(), "       gitweb upgrade [--yes] [--version <tag>]   (replace this binary with a release)")
 		flag.PrintDefaults()
 	}
 	flag.Parse()
@@ -223,23 +227,168 @@ func main() {
 	reg.Close()
 }
 
+// upgradeCommand 把 gitweb upgrade 的一次执行抽成可注入依赖的结构：标准输入输出、
+// 是否 TTY、当前版本与网络/安装参数都可替换，方便测试确认流程。
+type upgradeCommand struct {
+	opts    upgrade.Options
+	stdin   io.Reader
+	stdout  io.Writer
+	stderr  io.Writer
+	isTTY   bool
+	version string // 当前二进制版本，例如 v0.6.2；无法确定时为 "dev"
+}
+
 // runUpgrade 执行自更新。默认源仓库公开，无需凭据；GITHUB_TOKEN 可选
 // （提 API 额度，源仓库覆盖为私有时必填），源仓库（owner/name）可用
 // GITWEB_UPGRADE_REPO 覆盖；凭据不做成 flag，避免 token 出现在 shell
 // 历史与进程列表里。
 func runUpgrade(args []string) {
-	if len(args) > 0 {
-		log.Fatal("Usage: gitweb upgrade")
+	cmd := upgradeCommand{
+		opts: upgrade.Options{
+			Token: os.Getenv("GITHUB_TOKEN"),
+			Repo:  os.Getenv("GITWEB_UPGRADE_REPO"),
+		},
+		stdin:   os.Stdin,
+		stdout:  os.Stdout,
+		stderr:  os.Stderr,
+		isTTY:   isTerminal(os.Stdin),
+		version: currentVersion(),
 	}
-	log.Print("Downloading latest release...")
-	opts := upgrade.Options{
-		Token: os.Getenv("GITHUB_TOKEN"),
-		Repo:  os.Getenv("GITWEB_UPGRADE_REPO"),
+	os.Exit(cmd.run(args))
+}
+
+// run 执行一次升级，返回进程退出码。
+func (c upgradeCommand) run(args []string) int {
+	fs := flag.NewFlagSet("gitweb upgrade", flag.ContinueOnError)
+	fs.SetOutput(c.stderr)
+	var yes bool
+	fs.BoolVar(&yes, "yes", false, "skip the confirmation prompt")
+	fs.BoolVar(&yes, "y", false, "skip the confirmation prompt (shorthand)")
+	fs.StringVar(&c.opts.Tag, "version", "", "target release tag, e.g. v0.6.1; a lower tag is a downgrade")
+	fs.Usage = func() {
+		fmt.Fprintln(c.stderr, "Usage: gitweb upgrade [--yes] [--version <tag>]")
+		fs.PrintDefaults()
 	}
-	if err := upgrade.Upgrade(context.Background(), opts); err != nil {
-		log.Fatalf("Upgrade failed: %v", err)
+	if err := fs.Parse(args); err != nil {
+		return 2
 	}
-	log.Print("Upgrade completed. Restart gitweb to run the new binary.")
+	if fs.NArg() > 0 {
+		fs.Usage()
+		return 2
+	}
+
+	// 非交互又没带 --yes：直接拒绝，连网络请求都不发 —— 不能替用户默认装。
+	if !yes && !c.isTTY {
+		fmt.Fprintln(c.stderr, "Refusing to upgrade without confirmation: standard input is not a terminal.")
+		fmt.Fprintln(c.stderr, "Re-run with --yes to confirm non-interactively.")
+		return 1
+	}
+
+	rel, err := upgrade.Resolve(context.Background(), c.opts)
+	if err != nil {
+		if errors.Is(err, upgrade.ErrReleaseNotFound) {
+			fmt.Fprintf(c.stderr, "Upgrade failed: no release named %s on the update server.\n", strings.TrimSpace(c.opts.Tag))
+			return 1
+		}
+		fmt.Fprintf(c.stderr, "Upgrade failed: %v\n", err)
+		return 1
+	}
+
+	downgrade, same := classifyTarget(rel.Tag, c.version)
+	// 版本降级只允许显式 --version 指定：latest 比当前旧说明源站没有更新的版本，
+	// 不该悄悄把用户装回旧版。
+	if downgrade && strings.TrimSpace(c.opts.Tag) == "" {
+		fmt.Fprintf(c.stderr, "Upgrade failed: the latest release (%s) is older than the installed version (%s).\n", rel.Tag, c.version)
+		fmt.Fprintln(c.stderr, "Pass --version <tag> to downgrade explicitly.")
+		return 1
+	}
+
+	if !yes {
+		if !c.confirm(rel.Tag, downgrade, same) {
+			fmt.Fprintln(c.stdout, "Upgrade cancelled.")
+			return 1
+		}
+	}
+
+	verb := "Upgrading"
+	if downgrade {
+		verb = "Downgrading"
+	}
+	fmt.Fprintf(c.stdout, "%s to %s...\n", verb, rel.Tag)
+	if err := upgrade.Install(context.Background(), c.opts, rel); err != nil {
+		fmt.Fprintf(c.stderr, "Upgrade failed: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(c.stdout, "Done: %s -> %s. Restart gitweb to run the new binary.\n", c.version, rel.Tag)
+	return 0
+}
+
+// confirm 打印「当前版本 → 目标版本」并读一行确认，默认选 No。
+func (c upgradeCommand) confirm(target string, downgrade, same bool) bool {
+	fmt.Fprintf(c.stdout, "Current version: %s\n", c.version)
+	switch {
+	case downgrade:
+		fmt.Fprintf(c.stdout, "Target version:  %s (downgrade)\n", target)
+		fmt.Fprintln(c.stdout, "This replaces the installed binary with an older release.")
+	case same:
+		fmt.Fprintf(c.stdout, "Target version:  %s (same version, reinstall)\n", target)
+	default:
+		fmt.Fprintf(c.stdout, "Target version:  %s\n", target)
+	}
+	verb := "upgrade"
+	if downgrade {
+		verb = "downgrade"
+	}
+	fmt.Fprintf(c.stdout, "Proceed with %s? [y/N]: ", verb)
+
+	answer, err := bufio.NewReader(c.stdin).ReadString('\n')
+	if err != nil && strings.TrimSpace(answer) == "" {
+		fmt.Fprintln(c.stdout)
+		return false // EOF / 读错误：按默认 No 处理
+	}
+	switch strings.ToLower(strings.TrimSpace(answer)) {
+	case "y", "yes":
+		return true
+	default:
+		return false
+	}
+}
+
+// classifyTarget 判断目标版本相对当前是升级还是降级。任一方版本未知时两者都为 false。
+func classifyTarget(target, current string) (downgrade, same bool) {
+	cmp, ok := upgrade.CompareVersions(target, current)
+	if !ok {
+		return false, false
+	}
+	return cmp < 0, cmp == 0
+}
+
+// currentVersion 取当前二进制版本：优先编译期注入的 main.version（release 构建用
+// -ldflags -X main.version=<tag> 注入），未注入时退回 debug.ReadBuildInfo 的模块版本
+// （go install 构建），都拿不到才显示 dev。
+func currentVersion() string {
+	if v := normalizeVersion(version); v != "" {
+		return v
+	}
+	if info, ok := debug.ReadBuildInfo(); ok {
+		if v := normalizeVersion(info.Main.Version); v != "" {
+			return v
+		}
+	}
+	return "dev"
+}
+
+// normalizeVersion 把 "0.6.2"/"v0.6.2" 统一成 "v0.6.2"；无法当作版本号的返回空串。
+func normalizeVersion(v string) string {
+	v = strings.TrimSpace(v)
+	switch v {
+	case "", "dev", "devel", "(devel)", "unknown":
+		return ""
+	}
+	if !strings.HasPrefix(v, "v") {
+		v = "v" + v
+	}
+	return v
 }
 
 // defaultStatePath 是 -state、config 的 state_file 与 GITWEB_STATE 都未指定时的落盘位置。

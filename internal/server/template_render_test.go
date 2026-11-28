@@ -95,6 +95,13 @@ func TestEveryPageIncludesSharedHead(t *testing.T) {
 						t.Errorf("viewer.html 缺少文件搜索控件 %q", want)
 					}
 				}
+				// 默认态一律收起：分档默认态已作废，别再让它悄悄变回展开。
+				if !strings.Contains(body, `id="floating-tree-search" data-open="false"`) {
+					t.Error("搜索框应默认收起（data-open=false）")
+				}
+				if !strings.Contains(body, `aria-controls="floating-tree-search" aria-expanded="false"`) {
+					t.Error("搜索开关的初始 aria-expanded 应为 false")
+				}
 				// 搜索框的语义必须是「搜索框」而不是凭据字段：否则页面里一旦有密码输入，
 				// Chrome 的密码管理器就会对着搜索框弹已存账号补全。
 				for _, want := range []string{`type="search"`, `name="q"`, `autocomplete="off"`} {
