@@ -575,7 +575,8 @@ func (s *Server) handleSearchRefs(c *gin.Context) {
 
 	auth := authFromHeader(c, site.Auth)
 
-	refs, truncated, err := s.provider.SearchRefs(context.Background(), site.Provider, site.GitURL, auth, query, limit)
+	// 用请求自带的 context：前端 AbortController 掐断请求时，上游查询也跟着取消。
+	refs, truncated, err := s.provider.SearchRefs(c.Request.Context(), site.Provider, site.GitURL, auth, query, limit)
 	if err != nil {
 		switch {
 		case errors.Is(err, provider.ErrAuthRequired):
