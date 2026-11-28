@@ -21,7 +21,7 @@
                 <button class="dock-switch-btn floating-tree-btn" id="dock-switch-btn" type="button" title="切换停靠位置" data-en-title="Switch dock side" data-zh-title="切换停靠位置" aria-label="切换停靠位置" style="display:none;">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
                 </button>
-                <button class="floating-tree-btn search-toggle" id="tree-search-toggle" type="button" title="搜索文件" data-en-title="Search files" data-zh-title="搜索文件" aria-label="搜索文件" aria-controls="floating-tree-search" aria-expanded="true">
+                <button class="floating-tree-btn search-toggle" id="tree-search-toggle" type="button" title="搜索文件" data-en-title="Search files" data-zh-title="搜索文件" aria-label="搜索文件" aria-controls="floating-tree-search" aria-expanded="false">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
                 </button>
                 <button class="floating-tree-btn refresh" id="refresh-tree-btn" title="刷新文件树" data-en-title="Refresh tree" data-zh-title="刷新文件树" aria-label="刷新文件树">
@@ -35,7 +35,7 @@
         <!-- 文件搜索：输入即按路径过滤（空串回到目录树）。结果平铺显示，点选行为与树内文件行一致。
              整行可折叠：外层只做 grid-template-rows 0fr↔1fr 的高度动画（面板 fixed，
              不牵动页面布局），内层承担 padding 与边框，收起后高度真正归零。 -->
-        <div class="floating-tree-search" id="floating-tree-search" data-open="true">
+        <div class="floating-tree-search" id="floating-tree-search" data-open="false">
             <div class="ft-search-inner">
                 <svg class="ft-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
                 <input type="search" id="tree-search" name="q" class="ft-search-input" autocomplete="off" autocapitalize="off" spellcheck="false"
@@ -1392,12 +1392,10 @@
     }
 
     // ---------- 搜索框折叠 ----------
-    // 默认态按「面板自身宽度」判定，而不是视口：同一块面板会被停靠成左右侧栏（窄）或
-    // 页底长栏（宽），视口再怎么宽也说明不了它有多宽。基线是宽容器默认收起、窄容器
-    // 默认展开——底栏横着占一整行、再叠一条搜索行就是纯占地方；侧栏窄且高，展开不挤。
-    const SEARCH_NARROW_MAX = 360;
-    let searchOpen = true;
-    let searchNarrow = null; // 上次判定的宽度档位，只有档位变化才重置用户的手动选择
+    // 所有布局一律默认收起，点标题栏的放大镜才展开。早先按面板宽度分档（窄侧栏默认
+    // 展开）的规则已作废：同一块面板会被停靠成侧栏或页底长栏，宽度驱动的默认态在
+    // 两种布局下都留了一个「凭空多占一行」的默认值，不如统一收起、按需打开。
+    let searchOpen = false;
 
     function setSearchOpen(open, opts) {
         opts = opts || {};
@@ -1448,22 +1446,6 @@
         });
         if (clear) clear.addEventListener('click', () => { input.value = ''; sync(); input.focus(); });
         if (toggle) toggle.addEventListener('click', () => setSearchOpen(!searchOpen, { focus: !searchOpen }));
-
-        // ResizeObserver 盯面板自身：停靠切换、拖分隔条、浮窗缩放都会触发。
-        // 只在「宽 ↔ 窄」档位变化时重设默认态，同档位内拖宽不打扰用户手动开合；
-        // 迷你浮岛（48px）与形变过程中量到的宽度没有意义，直接跳过。
-        const win = document.getElementById('floating-tree-window');
-        if (win && typeof ResizeObserver !== 'undefined') {
-            const ro = new ResizeObserver((entries) => {
-                const w = entries[entries.length - 1].contentRect.width;
-                if (!w || win.classList.contains('minimized') || win.classList.contains('morphing')) return;
-                const narrow = w < SEARCH_NARROW_MAX;
-                if (narrow === searchNarrow) return;
-                searchNarrow = narrow;
-                setSearchOpen(narrow);
-            });
-            ro.observe(win);
-        }
     }
 
     // ---------- 内容区等待标签 ----------

@@ -11,7 +11,7 @@ Transform git repositories into browsable web pages.
 - **Multiple formats**: Renders `.md`/`.txt`/code as HTML, `.html` in a sandboxed iframe, images inline
 - **Private repositories**: When a repo requires auth, the viewer prompts for a token or username/password at access time. Credentials stay in the browser (sessionStorage) and are sent per-request — never stored on the server
 - **Optional site password**: Set a password in config / via `-password` flag to require login before any page can be accessed. Not set = public (default).
-- **File tree**: Floating, draggable file browser to navigate the repo, with path search that filters as you type. The search box folds into a title-bar toggle; whether it starts open follows the panel's own width (open in narrow docks, closed in the wide bottom bar). See [Finding files](#finding-files).
+- **File tree**: Floating, draggable file browser to navigate the repo, with path search that filters as you type. The search box folds into a title-bar toggle and starts collapsed in every layout. See [Finding files](#finding-files).
 - **Ref switcher**: Settings → Switch ref filters branches and tags on the server while you type, and still accepts a commit SHA. See [Switching refs](#switching-refs).
 - **Single binary**: Web assets (templates, CSS, JS) are embedded into the Go binary via `//go:embed`. The released tarball and Docker image contain only the binary — no external `web/` directory is needed.
 - **In-memory caching**: LRU + TTL cache; fetched file contents are cleared on restart
@@ -284,12 +284,10 @@ case-insensitive, matching any part of a path. Matches are listed flat with thei
 and the matched fragment highlighted; clearing the box (or pressing `Esc`) returns to the
 normal tree.
 
-- The magnifier button in the title bar shows and hides the search box. Collapsing also
-  clears the query, so the tree never looks like it is missing files.
-- Whether the box starts open depends on the **width of the panel itself**, not the viewport:
-  a narrow panel (the floating window, or the left/right dock) opens it, the full-width bottom
-  dock starts collapsed. Crossing that width threshold re-applies the default; within one
-  width band your manual toggle sticks.
+- The search box starts collapsed in every layout — floating window, left/right dock, and the
+  bottom bar alike. Click the magnifier button in the title bar to open it; click again (or
+  press `Esc` in the box) to put it away. Collapsing also clears the query, so the tree never
+  looks like it is missing files.
 - The panel keeps its size when the box opens or closes — only the tree area grows or shrinks.
 
 ### Switching refs
