@@ -11,7 +11,8 @@ Transform git repositories into browsable web pages.
 - **Multiple formats**: Renders `.md`/`.txt`/code as HTML, `.html` in a sandboxed iframe, images inline
 - **Private repositories**: When a repo requires auth, the viewer prompts for a token or username/password at access time. Credentials stay in the browser (sessionStorage) and are sent per-request — never stored on the server
 - **Optional site password**: Set a password in config / via `-password` flag to require login before any page can be accessed. Not set = public (default).
-- **File tree**: Floating, draggable file browser to navigate the repo
+- **File tree**: Floating, draggable file browser to navigate the repo, with path search that filters as you type. The search box folds into a title-bar toggle; whether it starts open follows the panel's own width (open in narrow docks, closed in the wide bottom bar). See [Finding files](#finding-files).
+- **Ref switcher**: Settings → Switch ref filters branches and tags on the server while you type, and still accepts a commit SHA. See [Switching refs](#switching-refs).
 - **Single binary**: Web assets (templates, CSS, JS) are embedded into the Go binary via `//go:embed`. The released tarball and Docker image contain only the binary — no external `web/` directory is needed.
 - **In-memory caching**: LRU + TTL cache; fetched file contents are cleared on restart
 - **Site registry persistence**: Sites added at runtime survive restarts via a JSON state file (config `state_file`, overridable by `-state` / `GITWEB_STATE`). It stores routing data only — path ID, git URL, ref, provider, view count, hidden flag. Credentials are never written to disk. See [Site state file](#site-state-file).
@@ -228,6 +229,20 @@ curl http://localhost:8080/api/sites/mysite/tree
 
 For private repos, pass credentials via the `Authorization` header (`Bearer <token>`, `token <token>`, or `Basic <base64>`); GitLab also accepts `PRIVATE-TOKEN`. The viewer does this automatically after you enter credentials in the prompt.
 
+### Search refs
+```bash
+# Optional q (empty = list branches only) and limit (default 30, max 100)
+curl "http://localhost:8080/api/sites/mysite/refs?q=v0.6&limit=20"
+```
+
+Returns `{"refs":[{"name":"v0.6.0","type":"tag"}],"truncated":false,"current":"main"}`.
+
+The filter runs on the provider side — GitHub `git/matching-refs` (prefix), GitLab
+`search=`, Gitea `q` for branches and a bounded server-side scan for tags — so a repository
+with thousands of refs never has its full list pulled. `q` accepts the ref character set
+(letters, digits, `.`, `-`, `_`, `/`, up to 100 chars); anything else is rejected with 400.
+Private repos take the same `Authorization` header.
+
 ### Token scopes
 
 gitweb only reads repositories — it never writes to them — so read-only tokens are enough
@@ -261,6 +276,35 @@ After registering a repository with pathid `mysite`:
 - `http://localhost:8080/mysite/page.html` → shows `page.html` in a sandboxed iframe
 
 Long plain-text files are paginated client-side.
+
+### Finding files
+
+The search box sits under the file tree's title bar and filters the tree as you type —
+case-insensitive, matching any part of a path. Matches are listed flat with their full path
+and the matched fragment highlighted; clearing the box (or pressing `Esc`) returns to the
+normal tree.
+
+- The magnifier button in the title bar shows and hides the search box. Collapsing also
+  clears the query, so the tree never looks like it is missing files.
+- Whether the box starts open depends on the **width of the panel itself**, not the viewport:
+  a narrow panel (the floating window, or the left/right dock) opens it, the full-width bottom
+  dock starts collapsed. Crossing that width threshold re-applies the default; within one
+  width band your manual toggle sticks.
+- The panel keeps its size when the box opens or closes — only the tree area grows or shrinks.
+
+### Switching refs
+
+Settings (⚙) → Switch ref opens a dialog whose input filters branches and tags as you type.
+Results are fetched from the server on demand (the first request fires when the dialog opens,
+nothing is prefetched on page load), debounced by 220 ms, and stale responses are discarded.
+
+- `↑` / `↓` move the highlight, `Enter` switches to the highlighted ref, `Esc` closes the
+  result list first and the dialog second.
+- Branch and tag hits are labelled; filtering happens upstream (prefix match on GitHub,
+  keyword match on GitLab/Gitea), so even repositories with thousands of refs never ship the
+  full list to the browser.
+- Typing a commit SHA still works: when nothing matches, `Enter` (or the Switch button)
+  switches to the raw value you typed.
 
 ## Architecture
 

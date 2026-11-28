@@ -1,6 +1,6 @@
 # gitweb 实现状态文档
 
-更新时间：2026-07-03（浏览数统计 + 首页站点列表浮层）
+更新时间：2026-11-28（文件树搜索折叠 + 切换 ref 边输边筛）
 
 ## 本期重构要点
 
@@ -47,6 +47,12 @@
 - 长纯文本前端分页
 - **首页右下角站点列表入口按钮**：点击弹出玻璃浮层，内含搜索框（pathid/url/ref/provider 实时过滤）+ 翻页（每页 5 条）+ 站点卡片列表。浮层数据打开时按需 `fetch /api/sites` 加载。
 - **viewer 标题栏浏览数徽章**：repo-ref 旁显示「👁 N」，N 为该站点累计被打开次数。
+- **文件树搜索框可折叠**：标题栏放大镜按钮开合搜索框，收起时行高归零（`grid-template-rows 0fr`），
+  只动面板内部高度，面板外框与页面布局不动。默认态按**面板自身宽度**（ResizeObserver）判定：
+  < 360px（浮窗、左右侧栏）默认展开，≥ 360px（通栏底停靠）默认收起；只在宽窄档位变化时重设，
+  同档位内保留用户手动开合。
+- **切换 ref 边输边筛**：弹窗输入即过滤分支/tag（220ms 防抖 + AbortController + seq 防乱序），
+  结果带分支/tag 标记，↑↓ 高亮、Enter 选中、Esc 分层关闭；仍支持直接输入未命中的 commit SHA。
 
 ### 站点浏览数统计
 - `Site` 结构体新增 `Views int64`；`stateRecord` 新增 `views` 字段（`omitempty`，向后兼容旧 state 文件）。
@@ -62,6 +68,7 @@ GET    /api/sites                    列出所有站点（含 views 浏览数）
 DELETE /api/sites/:pathid            删除站点
 POST   /api/sites/:pathid/refresh    刷新缓存
 GET    /api/sites/:pathid/tree       获取文件树（可带 Authorization 访问私有仓库）
+GET    /api/sites/:pathid/refs       按关键字搜索分支/tag（q、limit；服务端过滤）
 GET    /:pathid/*filepath            viewer 页面（Views+1）/ 文件内容
 ```
 
@@ -70,6 +77,8 @@ GET    /:pathid/*filepath            viewer 页面（Views+1）/ 文件内容
 - `internal/provider`：URL 解析、SSRF 拒绝（私网/环回）、allow/deny 通配、401/403→ErrAuthRequired、404→ErrNotFound、大文件→ErrTooLarge、Gitea token 鉴权头、tree、FilterRenderableFiles
 - `internal/cache`：TTL 过期、LRU 驱逐、Invalidate 前缀
 - `internal/render`：Kind 分派、IsRenderable、md/html/纯文本转义
+- `internal/provider`：ref 搜索（GitHub matching-refs 前缀匹配与并发合并、空关键字只列分支、Gitea 分支 q + tags 分页过滤、GitLab search）
+- `internal/server`：`/refs` 的 limit/400/404、关键字字符集校验；模板断言（搜索开关、ref 结果列表、首页 GitHub 入口）
 
 ## 已知限制 / 待改进
 
@@ -121,3 +130,15 @@ go build -o gitweb ./cmd/gitweb
 ./gitweb --config config.yaml
 ./gitweb --http-proxy http://10.0.0.1:7890
 ```
+
+## 2026-11-28 文件树搜索折叠 + 切换 ref 边输边筛
+
+**为什么默认态按面板宽度而不是视口**：同一块文件树面板会被停靠成左右侧栏（窄、纵向长），
+也会落在页面底部通栏（宽度等于视口）。用视口宽度判断，底栏和浮窗会被判成同一档；只有量面板
+自身的宽度（ResizeObserver + 360px 阈值）才能区分「横着占一整行」和「竖着占一列」。
+底栏再叠一条搜索行是纯占地方，所以宽容器收起；侧栏窄而高，展开不挤，所以窄容器展开。
+
+**为什么 ref 搜索放服务端**：仓库 ref 可能上千条，且 GitHub/GitLab/Gitea 都支持服务端过滤
+（matching-refs 前缀、search、q），没有理由先拉全量再在前端 filter。Gitea 的 tags 接口实测
+不认 q，退化为服务端分页扫描（3 页 × 50 封顶）后本地过滤，`truncated` 会告诉前端还有没扫到的。
+分支与 tag 是两次独立往返，并发发出，首开耗时从「两次之和」压到「较慢的一次」。
