@@ -71,6 +71,14 @@ func TestEveryPageIncludesSharedHead(t *testing.T) {
 					t.Errorf("%s 不该出现 controls 片段", tc.name)
 				}
 			}
+			if tc.name == "viewer.html" {
+				// 「切换 ref」支持边输边筛：输入框与结果列表必须在弹窗内成对出现
+				for _, want := range []string{`id="ref-results"`, `aria-controls="ref-results"`} {
+					if !strings.Contains(body, want) {
+						t.Errorf("viewer.html 缺少 ref 搜索下拉 %q", want)
+					}
+				}
+			}
 			switch tc.name {
 			case "index.html":
 				// 右上角要能一键跳到 GitHub 仓库（与主题/语言按钮同一排）
@@ -80,8 +88,8 @@ func TestEveryPageIncludesSharedHead(t *testing.T) {
 					}
 				}
 			case "viewer.html":
-				// 文件目录的搜索入口必须挂在浮窗内，否则搜索没有承载的 UI
-				for _, want := range []string{`id="tree-search"`, `id="tree-search-clear"`} {
+				// 文件目录的搜索入口必须挂在浮窗内，且带标题栏开关（折叠/展开）
+				for _, want := range []string{`id="tree-search"`, `id="tree-search-clear"`, `id="tree-search-toggle"`} {
 					if !strings.Contains(body, want) {
 						t.Errorf("viewer.html 缺少文件搜索控件 %q", want)
 					}

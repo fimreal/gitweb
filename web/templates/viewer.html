@@ -21,6 +21,9 @@
                 <button class="dock-switch-btn floating-tree-btn" id="dock-switch-btn" type="button" title="切换停靠位置" data-en-title="Switch dock side" data-zh-title="切换停靠位置" aria-label="切换停靠位置" style="display:none;">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
                 </button>
+                <button class="floating-tree-btn search-toggle" id="tree-search-toggle" type="button" title="搜索文件" data-en-title="Search files" data-zh-title="搜索文件" aria-label="搜索文件" aria-controls="floating-tree-search" aria-expanded="false">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+                </button>
                 <button class="floating-tree-btn refresh" id="refresh-tree-btn" title="刷新文件树" data-en-title="Refresh tree" data-zh-title="刷新文件树" aria-label="刷新文件树">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
                 </button>
@@ -29,18 +32,22 @@
                 </button>
             </div>
         </div>
-        <!-- 文件搜索：输入即按路径过滤（空串回到目录树）。结果平铺显示，点选行为与树内文件行一致。 -->
-        <div class="floating-tree-search" id="floating-tree-search">
-            <svg class="ft-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
-            <input type="search" id="tree-search" class="ft-search-input" autocomplete="off" autocapitalize="off" spellcheck="false"
-                   placeholder="搜索文件..."
-                   data-en-placeholder="Search files..."
-                   data-zh-placeholder="搜索文件..."
-                   aria-label="搜索文件">
-            <button class="ft-search-clear" id="tree-search-clear" type="button" hidden title="清空搜索"
-                    data-en-title="Clear search" data-zh-title="清空搜索" aria-label="清空搜索">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
-            </button>
+        <!-- 文件搜索：输入即按路径过滤（空串回到目录树）。结果平铺显示，点选行为与树内文件行一致。
+             整行可折叠：外层只做 grid-template-rows 0fr↔1fr 的高度动画（面板 fixed，
+             不牵动页面布局），内层承担 padding 与边框，收起后高度真正归零。 -->
+        <div class="floating-tree-search" id="floating-tree-search" data-open="true">
+            <div class="ft-search-inner">
+                <svg class="ft-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+                <input type="search" id="tree-search" class="ft-search-input" autocomplete="off" autocapitalize="off" spellcheck="false"
+                       placeholder="搜索文件..."
+                       data-en-placeholder="Search files..."
+                       data-zh-placeholder="搜索文件..."
+                       aria-label="搜索文件">
+                <button class="ft-search-clear" id="tree-search-clear" type="button" hidden title="清空搜索"
+                        data-en-title="Clear search" data-zh-title="清空搜索" aria-label="清空搜索">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+                </button>
+            </div>
         </div>
         <!-- 迷你浮岛态：居中显示的图标（可拖动、贴边吸附） -->
         <div class="min-dock" id="min-dock" title="点击展开 · 拖到边缘吸附">
@@ -221,7 +228,12 @@
             <h2 data-en="Switch ref" data-zh="切换 ref">切换 ref</h2>
             <p data-en="Enter a branch, tag, or commit SHA to view. The change is temporary and not saved to the site." data-zh="输入分支、tag 或 commit SHA 来切换查看。临时切换，不会写入站点配置。">输入分支、tag 或 commit SHA 来切换查看。临时切换，不会写入站点配置。</p>
             <div class="auth-form">
-                <input type="text" id="ref-input" placeholder="branch / tag / commit" autocomplete="off">
+                <div class="ref-combo" id="ref-combo">
+                    <input type="text" id="ref-input" autocomplete="off" role="combobox" aria-autocomplete="list"
+                           aria-expanded="false" aria-controls="ref-results" aria-label="搜索分支或 tag"
+                           placeholder="branch / tag / commit">
+                    <div class="ref-results" id="ref-results" role="listbox" hidden></div>
+                </div>
                 <div class="auth-actions">
                     <button id="ref-cancel" data-en="Cancel" data-zh="取消">取消</button>
                     <button id="ref-submit" class="primary" data-en="Switch" data-zh="切换">切换</button>
@@ -491,7 +503,132 @@
         });
     }
 
-    // ---------- 切换 ref 弹窗 ----------
+    // ---------- 切换 ref 弹窗：边输边筛 ----------
+    // 懒加载：首屏不碰 ref 列表，弹窗打开才按当前 ref 发第一次请求（一次只取 30 条）。
+    // 可取消：新输入先 abort 旧请求；seq 单调递增兜住「旧响应晚到」，不许覆盖新结果。
+    // 过滤在上游与后端完成（GitHub matching-refs 前缀 / GitLab search / Gitea q），
+    // 前端只拿当前关键字的结果，不做「先拉全量再 filter」。
+    const refSearch = { timer: null, controller: null, seq: 0, items: [], active: -1 };
+
+    function refResultsEl() { return document.getElementById('ref-results'); }
+
+    function refMessage(text) {
+        return '<div class="ref-result-msg">' + escapeHtml(text) + '</div>';
+    }
+
+    function setRefResultsExpanded(expanded) {
+        const input = document.getElementById('ref-input');
+        if (input) input.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+    }
+
+    function closeRefResults() {
+        const results = refResultsEl();
+        if (results) results.hidden = true;
+        setRefResultsExpanded(false);
+        refSearch.items = [];
+        refSearch.active = -1;
+    }
+
+    function renderRefResults(items, truncated) {
+        const results = refResultsEl();
+        if (!results) return;
+        refSearch.items = items;
+        refSearch.active = items.length ? 0 : -1; // 默认高亮第一条，回车即可选中
+        if (!items.length) {
+            results.innerHTML = refMessage(currentLang === 'zh' ? '没有匹配的分支或 tag' : 'No matching branches or tags');
+        } else {
+            const tagLabel = currentLang === 'zh' ? '标签' : 'tag';
+            const branchLabel = currentLang === 'zh' ? '分支' : 'branch';
+            results.innerHTML = items.map((it, i) =>
+                '<button type="button" class="ref-result' + (i === 0 ? ' active' : '') + '" role="option"'
+                + ' aria-selected="' + (i === 0 ? 'true' : 'false') + '"'
+                + ' data-ref="' + escapeHtml(it.name) + '" data-index="' + i + '">'
+                + '<span class="ref-result-name">' + escapeHtml(it.name) + '</span>'
+                + '<span class="ref-result-type">' + (it.type === 'tag' ? tagLabel : branchLabel) + '</span>'
+                + '</button>'
+            ).join('') + (truncated
+                ? refMessage(currentLang === 'zh' ? '结果较多，已显示前 ' + items.length + ' 条' : 'Showing first ' + items.length + ' results')
+                : '');
+            results.querySelectorAll('.ref-result').forEach(btn => {
+                btn.addEventListener('click', () => chooseRef(btn.dataset.ref));
+            });
+        }
+        results.hidden = false;
+        setRefResultsExpanded(true);
+    }
+
+    function setActiveRef(index) {
+        const results = refResultsEl();
+        if (!results || !refSearch.items.length) return;
+        const n = refSearch.items.length;
+        refSearch.active = ((index % n) + n) % n;
+        results.querySelectorAll('.ref-result').forEach((el, i) => {
+            const on = i === refSearch.active;
+            el.classList.toggle('active', on);
+            el.setAttribute('aria-selected', on ? 'true' : 'false');
+            if (on && el.scrollIntoView) el.scrollIntoView({ block: 'nearest' });
+        });
+    }
+
+    function abortRefSearch() {
+        if (refSearch.controller) {
+            refSearch.controller.abort();
+            refSearch.controller = null;
+        }
+    }
+
+    // 搜索请求：普通 fetch 走 AbortController（中止不该在顶部进度条上闪错误态）；
+    // 私有仓库返回 401 时再交给 authFetch 走既有凭据流程重试一次。
+    async function fetchRefSearch(url, signal) {
+        const resp = await fetch(url, { headers: authHeader(), signal });
+        if (resp.status === 401) return authFetch(url, {});
+        return resp;
+    }
+
+    async function searchRefs(query) {
+        const results = refResultsEl();
+        if (!results) return;
+        abortRefSearch();
+        clearTimeout(refSearch.timer);
+        const seq = ++refSearch.seq;
+        const controller = new AbortController();
+        refSearch.controller = controller;
+
+        results.innerHTML = refMessage(currentLang === 'zh' ? '搜索中...' : 'Searching...');
+        results.hidden = false;
+        setRefResultsExpanded(true);
+
+        try {
+            const resp = await fetchRefSearch('/api/sites/' + pathID + '/refs?limit=30&q=' + encodeURIComponent(query), controller.signal);
+            if (seq !== refSearch.seq) return; // 旧请求：已有更新的关键字在跑，结果直接丢掉
+            if (!resp.ok) {
+                const msg = resp.status === 400
+                    ? (currentLang === 'zh' ? '关键字只支持字母、数字和 . - _ /' : 'Only letters, digits and . - _ / are allowed')
+                    : (currentLang === 'zh' ? '搜索失败（' + resp.status + '）' : 'Search failed (' + resp.status + ')');
+                results.innerHTML = refMessage(msg);
+                refSearch.items = [];
+                refSearch.active = -1;
+                return;
+            }
+            const data = await resp.json();
+            if (seq !== refSearch.seq) return;
+            renderRefResults((data && data.refs) || [], !!(data && data.truncated));
+        } catch (err) {
+            if (err && err.name === 'AbortError') return;
+            if (seq !== refSearch.seq) return;
+            results.innerHTML = refMessage(currentLang === 'zh' ? '搜索失败: ' + (err && err.message || err) : 'Search failed: ' + (err && err.message || err));
+            refSearch.items = [];
+            refSearch.active = -1;
+        }
+    }
+
+    function chooseRef(ref) {
+        if (!ref) return;
+        closeRefResults();
+        closeRefModal();
+        switchRef(ref);
+    }
+
     function openRefModal() {
         const modal = document.getElementById('ref-modal');
         const input = document.getElementById('ref-input');
@@ -499,10 +636,15 @@
         modal.style.display = 'flex';
         input.value = currentRef;
         setTimeout(() => { input.focus(); input.select(); }, 0);
+        // 第一次打开才取数据：以当前 ref 为关键字，当前分支自然排在最前
+        searchRefs(currentRef);
     }
     function closeRefModal() {
         const modal = document.getElementById('ref-modal');
         if (modal) modal.style.display = 'none';
+        abortRefSearch();
+        clearTimeout(refSearch.timer);
+        closeRefResults();
     }
     function initRefSwitch() {
         const btn = document.getElementById('ref-switch-btn');
@@ -517,6 +659,47 @@
             closeRefModal();
             switchRef(val);
         });
+
+        const input = document.getElementById('ref-input');
+        if (input) {
+            input.addEventListener('input', () => {
+                clearTimeout(refSearch.timer);
+                const q = input.value.trim();
+                // 防抖：连打时不逐键打接口；上限 100 字符由后端兜底校验
+                refSearch.timer = setTimeout(() => searchRefs(q), 220);
+            });
+            input.addEventListener('keydown', (e) => {
+                const results = refResultsEl();
+                const open = results && !results.hidden && refSearch.items.length > 0;
+                if (e.key === 'ArrowDown' && open) {
+                    e.preventDefault();
+                    setActiveRef(refSearch.active + 1);
+                } else if (e.key === 'ArrowUp' && open) {
+                    e.preventDefault();
+                    setActiveRef(refSearch.active - 1);
+                } else if (e.key === 'Enter') {
+                    if (open && refSearch.active >= 0) {
+                        e.preventDefault();
+                        chooseRef(refSearch.items[refSearch.active].name);
+                        return;
+                    }
+                    const val = input.value.trim();
+                    if (val) {
+                        e.preventDefault();
+                        closeRefModal();
+                        switchRef(val); // 允许直接切到未命中列表的 commit SHA
+                    }
+                } else if (e.key === 'Escape') {
+                    // 第一下只收下拉，第二下才是关弹窗（弹窗自身的 Escape 由外层处理）
+                    if (open) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        closeRefResults();
+                    }
+                }
+            });
+        }
+
         // 点击遮罩关闭
         const modal = document.getElementById('ref-modal');
         if (modal) modal.addEventListener('click', (e) => { if (e.target === modal) closeRefModal(); });
@@ -1205,9 +1388,41 @@
         else renderTree(files);
     }
 
+    // ---------- 搜索框折叠 ----------
+    // 默认态按「面板自身宽度」判定，而不是视口：同一块面板会被停靠成左右侧栏（窄）或
+    // 页底长栏（宽），视口再怎么宽也说明不了它有多宽。基线是宽容器默认收起、窄容器
+    // 默认展开——底栏横着占一整行、再叠一条搜索行就是纯占地方；侧栏窄且高，展开不挤。
+    const SEARCH_NARROW_MAX = 360;
+    let searchOpen = true;
+    let searchNarrow = null; // 上次判定的宽度档位，只有档位变化才重置用户的手动选择
+
+    function setSearchOpen(open, opts) {
+        opts = opts || {};
+        const wrap = document.getElementById('floating-tree-search');
+        const toggle = document.getElementById('tree-search-toggle');
+        const input = document.getElementById('tree-search');
+        const clear = document.getElementById('tree-search-clear');
+        if (!wrap) return;
+        searchOpen = !!open;
+        wrap.dataset.open = searchOpen ? 'true' : 'false';
+        if (toggle) {
+            toggle.classList.toggle('open', searchOpen);
+            toggle.setAttribute('aria-expanded', searchOpen ? 'true' : 'false');
+        }
+        if (!searchOpen) {
+            // 收起 = 回到完整目录树：留着关键词会让树看起来缺文件
+            if (input && input.value) input.value = '';
+            if (clear) clear.hidden = true;
+            if (treeQuery) { treeQuery = ''; renderFilteredTree(); }
+        } else if (opts.focus && input) {
+            setTimeout(() => input.focus(), 180); // 等高度动画把输入框露出来
+        }
+    }
+
     function initTreeSearch() {
         const input = document.getElementById('tree-search');
         const clear = document.getElementById('tree-search-clear');
+        const toggle = document.getElementById('tree-search-toggle');
         if (!input) return;
         let timer = null;
         const sync = () => {
@@ -1229,6 +1444,23 @@
             }
         });
         if (clear) clear.addEventListener('click', () => { input.value = ''; sync(); input.focus(); });
+        if (toggle) toggle.addEventListener('click', () => setSearchOpen(!searchOpen, { focus: !searchOpen }));
+
+        // ResizeObserver 盯面板自身：停靠切换、拖分隔条、浮窗缩放都会触发。
+        // 只在「宽 ↔ 窄」档位变化时重设默认态，同档位内拖宽不打扰用户手动开合；
+        // 迷你浮岛（48px）与形变过程中量到的宽度没有意义，直接跳过。
+        const win = document.getElementById('floating-tree-window');
+        if (win && typeof ResizeObserver !== 'undefined') {
+            const ro = new ResizeObserver((entries) => {
+                const w = entries[entries.length - 1].contentRect.width;
+                if (!w || win.classList.contains('minimized') || win.classList.contains('morphing')) return;
+                const narrow = w < SEARCH_NARROW_MAX;
+                if (narrow === searchNarrow) return;
+                searchNarrow = narrow;
+                setSearchOpen(narrow);
+            });
+            ro.observe(win);
+        }
     }
 
     // ---------- 内容区等待标签 ----------
