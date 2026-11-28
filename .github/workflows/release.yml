@@ -67,13 +67,82 @@ jobs:
     permissions:
       contents: write
     steps:
+      # 需要完整历史与 tag：正文由「上一个 tag..当前 tag」的提交生成。
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
 
+      # release 正文必须能直接读到这版改了什么，不能只剩一句 Full Changelog 链接。
+      # 提交按 conventional-commit 前缀分组；GitHub 的自动生成说明在这里是空的
+      # （PR 合并在 Gitea 侧，GitHub 看不到关联 PR），所以正文自己拼。
+      - name: Compose release notes
+        env:
+          TAG: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          REPO: ${{ github.repository }}
+        run: |
+          python3 - <<'PY'
+          import os, re, subprocess
+
+          tag = os.environ["TAG"] if os.environ.get("REF_TYPE") == "tag" else "unreleased"
+          repo = os.environ["REPO"]
+
+          def git(*args):
+              return subprocess.run(["git", *args], capture_output=True, text=True, check=True).stdout
+
+          tags = git("tag", "--sort=-v:refname").split()
+          prev = next((t for t in tags if t != tag), "")
+
+          args = ["log", "--no-merges", "--pretty=%h%x09%s"]
+          if prev:
+              args.append(f"{prev}..HEAD")
+          else:
+              args += ["-n", "40", "HEAD"]
+          lines = [ln for ln in git(*args).splitlines() if "\t" in ln]
+
+          groups = [
+              ("新增功能", {"feat"}),
+              ("修复", {"fix"}),
+              ("文档", {"docs"}),
+              ("性能与重构", {"perf", "refactor"}),
+          ]
+          buckets = {name: [] for name, _ in groups}
+          buckets["其他"] = []
+          pattern = re.compile(r"^([a-zA-Z]+)(\([^)]*\))?!?:\s*(.+)$")
+
+          for line in lines:
+              sha, subject = line.split("\t", 1)
+              m = pattern.match(subject)
+              kind = m.group(1).lower() if m else ""
+              text = m.group(3) if m else subject
+              section = next((name for name, kinds in groups if kind in kinds), "其他")
+              buckets[section].append(f"- {text} (`{sha}`)")
+
+          out = ["## 本次更新", ""]
+          for name in [n for n, _ in groups] + ["其他"]:
+              if buckets[name]:
+                  out += [f"### {name}", *buckets[name], ""]
+          if not lines:
+              out += ["本次发布没有代码变更。", ""]
+          if prev:
+              out.append(f"**完整对比**：https://github.com/{repo}/compare/{prev}...{tag}")
+          else:
+              out.append(f"**完整对比**：https://github.com/{repo}/commits/{tag}")
+
+          body = "\n".join(out).rstrip() + "\n"
+          path = os.path.join(os.environ.get("RUNNER_TEMP", "."), "release-notes.md")
+          with open(path, "w", encoding="utf-8") as f:
+              f.write(body)
+          print(body)
+          PY
+
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
-          generate_release_notes: true
+          body_path: ${{ runner.temp }}/release-notes.md
           files: dist/*.tar.gz
