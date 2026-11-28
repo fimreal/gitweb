@@ -611,16 +611,41 @@ body {
     .floating-tree-btn.refresh.spinning svg { animation: none; }
 }
 
-/* ---------- 文件搜索行（标题栏下方，与内容区同宽同底） ---------- */
+/* ---------- 文件搜索行（标题栏下方，可折叠） ----------
+   折叠走 grid-template-rows 0fr↔1fr：动的只有这一行自己的高度，面板是 fixed 定位，
+   不会牵动页面其它布局；padding 与边框放在内层，收起时高度真正归零，目录树不跳动。 */
 .floating-tree-search {
+    display: grid;
+    grid-template-rows: 1fr;
+    flex-shrink: 0;
+    background: var(--panel-bg);
+    overflow: hidden;
+    transition: grid-template-rows 0.24s var(--ease-apple), opacity 0.18s ease;
+}
+.floating-tree-search[data-open="false"] {
+    grid-template-rows: 0fr;
+    opacity: 0;
+    pointer-events: none;
+}
+.ft-search-inner {
+    min-height: 0;
+    overflow: hidden;
     display: flex;
     align-items: center;
     gap: 6px;
     padding: 8px 10px;
     border-bottom: 1px solid var(--border);
-    background: var(--panel-bg);
-    flex-shrink: 0;
 }
+.floating-tree-search[data-open="false"] .ft-search-inner {
+    /* 收起时高度必须真的是 0：border-box 下 padding/边框会把一个 0 高度的盒子撑出来 */
+    padding-top: 0;
+    padding-bottom: 0;
+    border-bottom-width: 0;
+}
+
+/* 标题栏的搜索开关：展开时高亮，收起时与刷新/最小化同款 */
+.floating-tree-btn.search-toggle.open { color: var(--accent); background: var(--accent-soft); }
+
 .ft-search-icon {
     width: 14px;
     height: 14px;
@@ -1157,6 +1182,60 @@ body {
     outline: none;
     border-color: var(--accent);
     box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+/* ---------- 「切换 ref」边输边筛的结果列表 ----------
+   跟随文档流放在输入框下方：绝对定位会压住取消/切换按钮，卡片底部被切一半更难看。
+   高度只由结果条数决定，最多 240px 内部滚动。 */
+.ref-combo { position: relative; }
+.ref-results {
+    margin-top: 6px;
+    max-height: 240px;
+    overflow-y: auto;
+    padding: 4px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    box-shadow: var(--shadow-sm);
+}
+.ref-results[hidden] { display: none; }
+.ref-result {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 8px;
+    border: none;
+    background: transparent;
+    color: var(--fg);
+    font: inherit;
+    font-size: 0.929rem;
+    text-align: left;
+    border-radius: var(--r-sm);
+    cursor: pointer;
+}
+.ref-result:hover, .ref-result.active { background: var(--accent-soft); color: var(--accent); }
+.ref-result-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.ref-result-type {
+    flex-shrink: 0;
+    font-size: 0.75rem;
+    color: var(--secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--r-pill);
+    padding: 0 6px;
+}
+.ref-result.active .ref-result-type { color: var(--accent); }
+.ref-result-msg {
+    padding: 8px;
+    color: var(--secondary);
+    font-size: 0.857rem;
+    line-height: 1.4;
 }
 .auth-save-row {
     display: flex;
