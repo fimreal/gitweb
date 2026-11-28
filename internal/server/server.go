@@ -130,6 +130,7 @@ func (s *Server) SetupRoutes() *gin.Engine {
 		api.POST("/sites/:pathid/refresh", s.handleRefreshSite)
 		api.GET("/sites/:pathid/tree", s.handleGetTree)
 		api.GET("/sites/:pathid/branches", s.handleListBranches)
+		api.GET("/sites/:pathid/refs", s.handleSearchRefs)
 		api.PATCH("/sites/:pathid/hidden", s.handleSetHidden)
 	}
 
@@ -521,6 +522,75 @@ func (s *Server) handleListBranches(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"branches": branches, "current": site.Ref})
+}
+
+// refQueryMaxLen 是「切换 ref」搜索关键字的最大长度：关键字只用于上游 API 的
+// 前缀/关键字过滤，超长没有意义，且会被裸拼进上游 URL，先在这里截断口径。
+const refQueryMaxLen = 100
+
+// validRefQuery 校验引用搜索关键字。允许空串（表示「列出默认分支」）与 ref 字符集；
+// 关键字会被各 provider 拼进上游 URL 的查询串，拒绝 ".." 与斜杠连写等异常形态，
+// 与 registry.IsValidRef 的口径保持一致，避免把任意串透传给上游。
+func validRefQuery(q string) bool {
+	if len(q) > refQueryMaxLen {
+		return false
+	}
+	for _, r := range q {
+		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
+			(r >= '0' && r <= '9') || r == '.' || r == '-' || r == '_' || r == '/') {
+			return false
+		}
+	}
+	return !strings.Contains(q, "..")
+}
+
+// handleSearchRefs 按关键字过滤分支/tag，供 viewer 的「切换 ref」下拉边输边筛。
+//
+// 过滤发生在服务端与上游：前端只拿当前关键字的结果，不预取全量 ref 列表。
+// limit 默认 30、上限 100，truncated 告诉前端「还有更多」。
+func (s *Server) handleSearchRefs(c *gin.Context) {
+	pathID := c.Param("pathid")
+
+	site, err := s.registry.Get(pathID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "site not found"})
+		return
+	}
+
+	query := strings.TrimSpace(c.Query("q"))
+	if !validRefQuery(query) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid ref query"})
+		return
+	}
+
+	limit := 30
+	if raw := c.Query("limit"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n <= 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid limit"})
+			return
+		}
+		limit = n
+	}
+
+	auth := authFromHeader(c, site.Auth)
+
+	refs, truncated, err := s.provider.SearchRefs(context.Background(), site.Provider, site.GitURL, auth, query, limit)
+	if err != nil {
+		switch {
+		case errors.Is(err, provider.ErrAuthRequired):
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		case errors.Is(err, provider.ErrRateLimited):
+			c.JSON(http.StatusTooManyRequests, gin.H{"error": "too many requests, please try again later"})
+		default:
+			c.JSON(http.StatusBadGateway, gin.H{"error": "failed to search refs: " + err.Error()})
+		}
+		return
+	}
+	if refs == nil {
+		refs = []provider.Ref{} // 空结果序列化成 []，别让前端拿到 null
+	}
+	c.JSON(http.StatusOK, gin.H{"refs": refs, "truncated": truncated, "current": site.Ref})
 }
 
 // effectiveRef 解析 viewer 临时切换分支用的 ?ref= 覆盖值。
