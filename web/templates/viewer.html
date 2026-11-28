@@ -38,7 +38,7 @@
         <div class="floating-tree-search" id="floating-tree-search" data-open="true">
             <div class="ft-search-inner">
                 <svg class="ft-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
-                <input type="search" id="tree-search" class="ft-search-input" autocomplete="off" autocapitalize="off" spellcheck="false"
+                <input type="search" id="tree-search" name="q" class="ft-search-input" autocomplete="off" autocapitalize="off" spellcheck="false"
                        placeholder="搜索文件..."
                        data-en-placeholder="Search files..."
                        data-zh-placeholder="搜索文件..."
@@ -194,9 +194,11 @@
                     <option value="token" data-en="Token" data-zh="Token">Token</option>
                     <option value="basic" data-en="Username & Password" data-zh="账号密码">账号密码</option>
                 </select>
-                <input type="password" id="auth-token" placeholder="Token" data-en-placeholder="Token" data-zh-placeholder="Token" autocomplete="off">
-                <input type="text" id="auth-username" placeholder="用户名" data-en-placeholder="Username" data-zh-placeholder="用户名" autocomplete="off" style="display:none;">
-                <input type="password" id="auth-password" placeholder="密码" data-en-placeholder="Password" data-zh-placeholder="密码" autocomplete="off" style="display:none;">
+                <!-- 仓库凭据不是本站登录：autocomplete=new-password 让 Chrome 的密码管理器不要在这里
+                     提议/保存本站账号，否则整页会被判定成登录表单，连目录搜索框都会弹密码补全。 -->
+                <input type="password" id="auth-token" name="repo-token" placeholder="Token" data-en-placeholder="Token" data-zh-placeholder="Token" autocomplete="new-password">
+                <input type="text" id="auth-username" name="repo-username" placeholder="用户名" data-en-placeholder="Username" data-zh-placeholder="用户名" autocomplete="off" style="display:none;">
+                <input type="password" id="auth-password" name="repo-password" placeholder="密码" data-en-placeholder="Password" data-zh-placeholder="密码" autocomplete="new-password" style="display:none;">
                 <label class="auth-save-row">
                     <input type="checkbox" id="auth-save-local">
                     <span data-en="Save to this browser (7 days)" data-zh="保存到浏览器（7 天）">保存到浏览器（7 天）</span>
@@ -229,7 +231,8 @@
             <p data-en="Enter a branch, tag, or commit SHA to view. The change is temporary and not saved to the site." data-zh="输入分支、tag 或 commit SHA 来切换查看。临时切换，不会写入站点配置。">输入分支、tag 或 commit SHA 来切换查看。临时切换，不会写入站点配置。</p>
             <div class="auth-form">
                 <div class="ref-combo" id="ref-combo">
-                    <input type="text" id="ref-input" autocomplete="off" role="combobox" aria-autocomplete="list"
+                    <input type="search" id="ref-input" name="ref-query" autocomplete="off" autocapitalize="off" spellcheck="false"
+                           role="combobox" aria-autocomplete="list"
                            aria-expanded="false" aria-controls="ref-results" aria-label="搜索分支或 tag"
                            placeholder="branch / tag / commit">
                     <div class="ref-results" id="ref-results" role="listbox" hidden></div>

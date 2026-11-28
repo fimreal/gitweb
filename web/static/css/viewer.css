@@ -1198,6 +1198,9 @@ body {
     border-radius: var(--r-md);
     box-shadow: var(--shadow-sm);
 }
+/* ref 搜索用 type=search（让浏览器按搜索框而非凭据框处理），收掉原生清除叉，
+   与文件搜索框保持一致，避免多出一个会绕过防抖的清除入口。 */
+.ref-combo input::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
 .ref-results[hidden] { display: none; }
 .ref-result {
     width: 100%;
