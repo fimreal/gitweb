@@ -1,6 +1,7 @@
 package server
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 
@@ -94,8 +95,46 @@ func TestEveryPageIncludesSharedHead(t *testing.T) {
 						t.Errorf("viewer.html 缺少文件搜索控件 %q", want)
 					}
 				}
+				// 搜索框的语义必须是「搜索框」而不是凭据字段：否则页面里一旦有密码输入，
+				// Chrome 的密码管理器就会对着搜索框弹已存账号补全。
+				for _, want := range []string{`type="search"`, `name="q"`, `autocomplete="off"`} {
+					if !strings.Contains(inputTag(t, body, "tree-search"), want) {
+						t.Errorf("tree-search 缺少 %q（会被 Chrome 当成登录表单字段）", want)
+					}
+				}
+				for _, want := range []string{`type="search"`, `autocomplete="off"`} {
+					if !strings.Contains(inputTag(t, body, "ref-input"), want) {
+						t.Errorf("ref-input 缺少 %q（会被 Chrome 当成登录表单字段）", want)
+					}
+				}
+				// 仓库凭据弹窗不是本站登录：password 字段必须标 new-password，避免密码管理器接手。
+				for _, id := range []string{"auth-token", "auth-password"} {
+					tag := inputTag(t, body, id)
+					if strings.Contains(tag, `autocomplete="current-password"`) {
+						t.Errorf("%s 不该标 current-password（会让整页被判定成登录表单）", id)
+					}
+					if !strings.Contains(tag, `autocomplete="new-password"`) {
+						t.Errorf("%s 缺少 autocomplete=new-password", id)
+					}
+				}
+			case "login.html":
+				// 真正的站点密码框要保留正常填充能力，别被这轮的改动带坏。
+				if tag := inputTag(t, body, "password"); !strings.Contains(tag, `autocomplete="current-password"`) {
+					t.Errorf("login.html 的密码框必须保留 autocomplete=current-password，实际 = %s", tag)
+				}
 			}
 			assertAssetsResolve(t, r, body)
 		})
 	}
+}
+
+// inputTag 取出指定 id 的 <input> 标签原文（含跨行属性），用于断言输入框语义。
+func inputTag(t *testing.T, body, id string) string {
+	t.Helper()
+	re := regexp.MustCompile(`<input[^>]*id="` + regexp.QuoteMeta(id) + `"[^>]*>`)
+	tag := re.FindString(body)
+	if tag == "" {
+		t.Fatalf("找不到 id=%q 的输入框", id)
+	}
+	return tag
 }

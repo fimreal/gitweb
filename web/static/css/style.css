@@ -545,6 +545,8 @@ pre {
     border: 1px solid var(--border-strong);
     border-radius: var(--r-md);
 }
+/* 搜索框改用 type=search（浏览器据此不当作凭据字段），收掉原生清除叉保持原样 */
+.sites-panel-search .main-input::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
 .sites-panel-search .main-input:focus {
     background: var(--bg);
     border-color: var(--accent);
