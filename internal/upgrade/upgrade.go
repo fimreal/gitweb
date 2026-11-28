@@ -15,13 +15,15 @@
 //     CDN，因此只有 asset 链路的重定向放行同源或固定的 GitHub CDN 域名
 //     白名单（端口限 443），任何降级或白名单外的主机直接拒绝，跳数显式封顶。
 //   - token 只发往 API 源站；跨源重定向跳显式剥离 Authorization。
-//   - 对外错误一律固定分类文案，不携带 URL、tag、路径或底层网络/文件系统错误
-//     —— 下载路径含 release tag，安装目录可能含版本号。
+//   - 对外错误一律固定分类文案，不携带 URL、路径或底层网络/文件系统错误
+//     —— 安装目录与下载地址都可能含版本号。版本号只允许出现在 CLI 的确认提示与
+//     成功摘要里（由 cmd 层渲染），本包返回的错误仍不带 tag。
 //   - 归档完整读完（gzip 尾部 CRC/长度校验必须执行），拒绝重复目标条目，
 //     解压总量有预算；二进制做结构级校验；API 若提供 digest 字段则强制比对，
 //     否则 release 附带 <asset>.sha256 校验和 asset 时强制比对。
 //
-// 按需求约定，本包任何错误信息与日志都不得包含版本号/tag 名。
+// 按需求约定，本包的错误信息不带版本号/tag 名；版本号只在 cmd 层的确认提示与
+// 成功摘要里出现（2026-11-28 明确裁决），错误仍不得包含路径、URL 或底层错误。
 package upgrade
 
 import (
@@ -89,17 +91,37 @@ type Options struct {
 	GOARCH         string // 目标架构（amd64/arm64），默认 runtime.GOARCH
 	ExecutablePath string // 要替换的可执行文件路径，默认当前进程
 	Client         *http.Client
+	Tag            string // 目标 release tag（如 v0.6.1）；空 = 最新 release
 }
 
-// Upgrade 下载最新 release 的二进制并替换当前可执行文件。
-// 下载、解包、校验的任何一步失败都直接返回错误，原文件保持不动。
-func Upgrade(ctx context.Context, opts Options) error {
+// ErrReleaseNotFound 表示 --version 指定的 release 在更新源上不存在。
+// 单独成 sentinel：CLI 要把用户输入的 tag 原样回显在提示里（tag 是用户给的，
+// 不是从安装路径推导出来的，不属于「不得泄漏」的那类信息）。
+var ErrReleaseNotFound = errors.New("requested release not found on the update server")
+
+// Release 是一次解析出来的目标 release：包含 tag 与已选定的当前平台 asset。
+// asset 字段不导出——下载地址与校验材料只在包内使用。
+type Release struct {
+	Tag   string
+	asset releaseAsset
+}
+
+// prepared 是补齐默认值之后的运行环境。
+type prepared struct {
+	base        *url.URL
+	apiClient   *http.Client
+	assetClient *http.Client
+}
+
+// prepare 补齐默认值并构造两条 client：API 与 asset 各用一份副本、两套重定向
+// 策略（元数据每一跳严格同源，asset 允许 CDN 白名单）。副本避免改写调用方注入的 client。
+func prepare(opts Options) (Options, prepared, error) {
 	if opts.BaseURL == "" {
 		opts.BaseURL = DefaultBaseURL
 	}
 	base, err := url.Parse(opts.BaseURL)
 	if err != nil || base.Scheme != "https" || base.Host == "" {
-		return errors.New("update source must be an https URL")
+		return opts, prepared{}, errors.New("update source must be an https URL")
 	}
 	if opts.Repo == "" {
 		opts.Repo = DefaultRepo
@@ -113,29 +135,42 @@ func Upgrade(ctx context.Context, opts Options) error {
 	if opts.Client == nil {
 		opts.Client = &http.Client{Timeout: 5 * time.Minute}
 	}
-	// API 与 asset 各用一份 client 副本、两套重定向策略：元数据每一跳严格
-	// 同源，只有 asset 允许 CDN 白名单。副本避免改写调用方注入的 client。
 	apiClient := *opts.Client
 	apiClient.CheckRedirect = apiRedirectPolicy(base)
 	assetClient := *opts.Client
 	assetClient.CheckRedirect = assetRedirectPolicy(base)
+	return opts, prepared{base: base, apiClient: &apiClient, assetClient: &assetClient}, nil
+}
 
-	rel, err := latestAsset(ctx, opts, &apiClient, base)
+// Resolve 只取目标 release 的元数据（tag 与选定 asset），不下载、不写盘。
+// CLI 需要先拿到 tag 才能显示「当前版本 → 目标版本」的确认提示。
+func Resolve(ctx context.Context, opts Options) (Release, error) {
+	opts, env, err := prepare(opts)
+	if err != nil {
+		return Release{}, err
+	}
+	return fetchRelease(ctx, opts, env.apiClient, env.base)
+}
+
+// Install 下载 Resolve 选定的 release，校验通过后原子替换当前可执行文件。
+// 下载、解包、校验的任何一步失败都直接返回错误，原文件保持不动。
+func Install(ctx context.Context, opts Options, rel Release) error {
+	opts, env, err := prepare(opts)
 	if err != nil {
 		return err
 	}
-	archive, err := download(ctx, opts, &assetClient, base, rel.url, maxDownloadSize, "release asset")
+	archive, err := download(ctx, opts, env.assetClient, env.base, rel.asset.url, maxDownloadSize, "release asset")
 	if err != nil {
 		return err
 	}
 	// digest 来自 release API 本身，优先于同源下载的 .sha256 sidecar；
 	// sidecar 的可用性检查只在确实要用它（无 digest）时做。
-	if rel.digest != "" {
-		if err := verifyDigest(rel.digest, archive); err != nil {
+	if rel.asset.digest != "" {
+		if err := verifyDigest(rel.asset.digest, archive); err != nil {
 			return err
 		}
-	} else if rel.hasChecksum {
-		if err := verifyChecksum(ctx, opts, &assetClient, base, rel.checksumURL, archive); err != nil {
+	} else if rel.asset.hasChecksum {
+		if err := verifyChecksum(ctx, opts, env.assetClient, env.base, rel.asset.checksumURL, archive); err != nil {
 			return err
 		}
 	}
@@ -159,6 +194,15 @@ func Upgrade(ctx context.Context, opts Options) error {
 		}
 	}
 	return replaceBinary(exePath, bin)
+}
+
+// Upgrade 解析目标 release 并安装，等价于 Resolve + Install。
+func Upgrade(ctx context.Context, opts Options) error {
+	rel, err := Resolve(ctx, opts)
+	if err != nil {
+		return err
+	}
+	return Install(ctx, opts, rel)
 }
 
 // apiRedirectPolicy 是 release 元数据请求的重定向策略：每一跳严格同源。
@@ -261,25 +305,39 @@ type releaseAsset struct {
 	hasChecksum bool
 }
 
-// latestAsset 查询最新 release，选出当前平台 asset 的 API 下载地址、
-// 可选校验和 sidecar 与可选 digest。刻意不解析、不返回 tag 名 ——
-// 版本号不允许出现在任何输出里。
-func latestAsset(ctx context.Context, opts Options, client *http.Client, base *url.URL) (releaseAsset, error) {
-	var rel releaseAsset
+// releaseTagRe 限定 --version 的形状：必须是 vX.Y.Z（可带预发布后缀）。
+// tag 会被拼进 API 路径，先按白名单字符收敛，避免把任意串当路径段。
+var releaseTagRe = regexp.MustCompile(`^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?$`)
+
+// fetchRelease 查询目标 release：Tag 为空取最新，否则按 tag 取指定版本。
+// 选出当前平台 asset 的 API 下载地址、可选校验和 sidecar 与可选 digest。
+func fetchRelease(ctx context.Context, opts Options, client *http.Client, base *url.URL) (Release, error) {
+	var rel Release
+	tag := strings.TrimSpace(opts.Tag)
 	api := fmt.Sprintf("%s/repos/%s/releases/latest", opts.BaseURL, opts.Repo)
+	if tag != "" {
+		if !releaseTagRe.MatchString(tag) {
+			return rel, errors.New("invalid target version (expected a release tag like v1.2.3)")
+		}
+		api = fmt.Sprintf("%s/repos/%s/releases/tags/%s", opts.BaseURL, opts.Repo, url.PathEscape(tag))
+	}
 	resp, err := doGET(ctx, opts, client, base, api, "release API", "application/vnd.github+json")
 	if err != nil {
 		return rel, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNotFound {
+		if tag != "" {
+			return rel, ErrReleaseNotFound
+		}
 		return rel, errors.New("no published release found on the update server")
 	}
 	if resp.StatusCode != http.StatusOK {
 		return rel, fmt.Errorf("release API returned HTTP %d", resp.StatusCode)
 	}
 	var parsed struct {
-		Assets []struct {
+		TagName string `json:"tag_name"`
+		Assets  []struct {
 			Name               string `json:"name"`
 			URL                string `json:"url"`
 			BrowserDownloadURL string `json:"browser_download_url"`
@@ -288,6 +346,10 @@ func latestAsset(ctx context.Context, opts Options, client *http.Client, base *u
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&parsed); err != nil {
 		return rel, errors.New("parse release response failed")
+	}
+	rel.Tag = strings.TrimSpace(parsed.TagName)
+	if rel.Tag == "" {
+		rel.Tag = tag // API 没给 tag_name 时用请求的那个；latest 情况下保持为空
 	}
 	want := assetName(opts.GOOS, opts.GOARCH)
 	for _, a := range parsed.Assets {
@@ -298,16 +360,16 @@ func latestAsset(ctx context.Context, opts Options, client *http.Client, base *u
 		}
 		switch a.Name {
 		case want:
-			rel.url, rel.digest = dl, a.Digest
+			rel.asset.url, rel.asset.digest = dl, a.Digest
 		case want + ".sha256":
-			rel.hasChecksum, rel.checksumURL = true, dl
+			rel.asset.hasChecksum, rel.asset.checksumURL = true, dl
 		}
 	}
-	if rel.url == "" {
-		return rel, fmt.Errorf("latest release has no asset for %s/%s", opts.GOOS, opts.GOARCH)
+	if rel.asset.url == "" {
+		return rel, fmt.Errorf("release has no asset for %s/%s", opts.GOOS, opts.GOARCH)
 	}
 	// API 返回的地址同样要过链路白名单，恶意/被篡改的响应不能把请求引向别处。
-	if u, err := url.Parse(rel.url); err != nil || !allowedAssetURL(base, u) {
+	if u, err := url.Parse(rel.asset.url); err != nil || !allowedAssetURL(base, u) {
 		return rel, errCrossOrigin
 	}
 	return rel, nil

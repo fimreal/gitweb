@@ -67,10 +67,16 @@ Visit `http://localhost:8080` to register repositories.
 ### Self upgrade
 
 ```bash
-gitweb upgrade
+gitweb upgrade                    # confirm, then install the latest release
+gitweb upgrade --version v0.6.1   # install a specific release tag
+gitweb upgrade --yes              # skip the confirmation prompt
 ```
 
-Downloads the latest release from the source repository's GitHub Releases and replaces the current binary. Target platforms are Linux/macOS (amd64/arm64); Windows is not supported. The update channel is HTTPS-only: every hop of an API request stays strictly on the API origin (`api.github.com`) — a cross-origin response can never become the source of release metadata; assets are downloaded through the API asset endpoint (identical behavior for public and private repos), and asset redirects are only allowed to the same origin or a fixed list of GitHub asset CDN hosts (port 443 only) — downgrades and off-list targets are rejected, with an explicit hop cap. The token is only sent to the API origin and is stripped on cross-origin redirect hops.
+Downloads a release from the source repository's GitHub Releases and replaces the current binary. Target platforms are Linux/macOS (amd64/arm64); Windows is not supported. The update channel is HTTPS-only: every hop of an API request stays strictly on the API origin (`api.github.com`) — a cross-origin response can never become the source of release metadata; assets are downloaded through the API asset endpoint (identical behavior for public and private repos), and asset redirects are only allowed to the same origin or a fixed list of GitHub asset CDN hosts (port 443 only) — transport (HTTPS) downgrades and off-list targets are rejected, with an explicit hop cap. The token is only sent to the API origin and is stripped on cross-origin redirect hops.
+
+**Confirmation.** Before anything is downloaded, `upgrade` prints the current version and the target version and asks `Proceed with upgrade? [y/N]`; an empty answer means No. `--yes` / `-y` skips the prompt. When stdin is not a terminal, `upgrade` refuses to run without `--yes` — it never installs on your behalf.
+
+**Specific versions and downgrades.** `--version v1.2.3` selects a release tag instead of `latest`. Pointing it at an older tag is a version downgrade: it is only allowed when you name that tag explicitly, the prompt is labelled `downgrade`, and it still goes through the same download/verification path. If `latest` itself is older than the installed binary, the command refuses and asks you to pass `--version` if you really mean to downgrade. The current version comes from the build: release binaries embed their tag, and a local build reports `dev` (no comparison is attempted then). Note that "downgrade" above is about versions; HTTPS transport downgrade is a separate thing and is always rejected.
 
 Before replacement the download is verified: full archive integrity (the gzip trailer checksum is always checked), executable format, architecture and header-table bounds; the GitHub API's `digest` field (sha256) is verified when present, otherwise a published `<asset>.sha256` checksum asset is verified. Be clear about what this covers: **with neither, only the gzip CRC, partial executable structure and the TLS transport are checked — there is no guarantee the file is complete and runnable**. The digest/checksum comes from the same API as the binary: it guards against transport corruption, but it is **not an independent publisher signature**. Any download or verification failure leaves the existing binary untouched.
 
@@ -88,7 +94,7 @@ The source repository defaults to `fimreal/gitweb` and can be overridden:
 GITWEB_UPGRADE_REPO=<owner>/<repo> gitweb upgrade
 ```
 
-The command only upgrades — it never prints version information. To honor the "no version numbers in any output" rule, upgrade failures report fixed-category messages only — no paths, URLs or underlying system errors, since the install directory and download URLs may contain version numbers. The tradeoff: errors never show concrete paths.
+Version numbers appear in exactly two places: the confirmation prompt (current → target) and the success summary. Failures stay fixed-category — no paths, URLs or underlying system errors, since the install directory and download URLs may contain version numbers. The tradeoff: errors never show concrete paths.
 
 ## Configuration
 

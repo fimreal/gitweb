@@ -67,10 +67,16 @@ docker run -d -p 8080:8080 -v gitweb-state:/data gitweb
 ### 自更新
 
 ```bash
-gitweb upgrade
+gitweb upgrade                    # 确认后升级到最新版
+gitweb upgrade --version v0.6.1   # 指定某个 release tag
+gitweb upgrade --yes              # 跳过确认
 ```
 
-从源仓库的 GitHub Releases 下载最新 release 并替换当前二进制。目标平台为 Linux/macOS（amd64/arm64），不支持 Windows。更新链路仅 HTTPS：API 请求每一跳严格同源（源站 `api.github.com`），跨源响应不能成为 release 元数据来源；asset 统一走 API asset 端点下载（公开与私有仓库行为一致），其重定向只放行同源或固定的 GitHub 资产 CDN 域名（端口限 443），降级与白名单外的目标一律拒绝，跳数有上限。token 只发往 API 源站，跨源重定向跳会剥离凭据。
+从源仓库的 GitHub Releases 下载 release 并替换当前二进制。目标平台为 Linux/macOS（amd64/arm64），不支持 Windows。更新链路仅 HTTPS：API 请求每一跳严格同源（源站 `api.github.com`），跨源响应不能成为 release 元数据来源；asset 统一走 API asset 端点下载（公开与私有仓库行为一致），其重定向只放行同源或固定的 GitHub 资产 CDN 域名（端口限 443），**HTTPS 传输降级**与白名单外的目标一律拒绝，跳数有上限。token 只发往 API 源站，跨源重定向跳会剥离凭据。
+
+**确认**：下载之前会打印「当前版本 → 目标版本」，并问 `Proceed with upgrade? [y/N]`，直接回车即 No。`--yes` / `-y` 跳过确认。stdin 不是终端时，不带 `--yes` 会直接拒绝执行，绝不替用户默认安装。
+
+**指定版本与降级**：`--version v1.2.3` 用 tag 指定目标，不再取 latest。指向比当前更旧的 tag 属于**版本降级**：只有显式写出该 tag 才允许，提示语会标注 `downgrade`，下载校验流程与升级完全一致。如果 latest 本身比当前二进制旧，命令会拒绝并提示改用 `--version` 显式降级。当前版本来自构建产物：release 二进制内嵌了 tag，本地构建显示 `dev`（此时不做版本比较）。注意这里的「降级」指版本；HTTPS 传输降级是另一回事，始终拒绝。
 
 替换前先校验下载产物：归档完整性（gzip 尾部校验和必查）、可执行格式、架构与头部表边界；GitHub API 若返回 `digest` 字段（sha256）则强制比对，否则 release 附带 `<asset>.sha256` 校验和 asset 时强制比对。校验的边界要说清楚：**两者都没有时，实际检查的只有 gzip CRC、部分可执行结构和 TLS 传输链路，不保证文件完整、可运行**；digest/校验和与二进制来自同一 API，防的是传输损坏，**不是独立的发布者签名**。下载或校验的任何一步失败都保持原文件不动。
 
@@ -88,7 +94,7 @@ GITHUB_TOKEN=<token> gitweb upgrade
 GITWEB_UPGRADE_REPO=<owner>/<repo> gitweb upgrade
 ```
 
-该命令只做更新替换，不输出任何版本信息。为满足「任何输出不含版本号」的约定，升级失败的报错只有固定分类文案，不携带路径、URL 或底层系统错误 —— 安装目录和下载链接都可能含版本号。代价是报错里拿不到具体路径。
+版本号只出现在两处：确认提示（当前 → 目标）和成功摘要。失败的报错仍是固定分类文案，不携带路径、URL 或底层系统错误 —— 安装目录和下载链接都可能含版本号。代价是报错里拿不到具体路径。
 
 ## 配置
 
